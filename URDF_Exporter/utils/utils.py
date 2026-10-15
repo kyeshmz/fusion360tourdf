@@ -109,6 +109,69 @@ def _occurrence_bodies(occ):
     return None
 
 
+def occurrence_visible(occ):
+    """True unless the occurrence (or its component) hides its light bulb.
+
+    newtonjeri's exporter lets users pick the export set with light-bulb
+    toggles; Adriaeik treats hidden bodies as not exported. Default True
+    when the API shape is unavailable (e.g. offline mocks).
+    """
+    for source in (occ, getattr(occ, 'component', None)):
+        try:
+            bulb = getattr(source, 'isLightBulbOn', None)
+            if bulb is None:
+                continue
+            if callable(bulb):
+                bulb = bulb()
+            if bulb is False:
+                return False
+        except Exception:
+            continue
+    return True
+
+
+def iter_link_occurrences(root):
+    """Yield exportable leaf occurrences in global context.
+
+    Prefers ``root.allOccurrences`` (nested assemblies included) over
+    ``root.occurrences`` (top level only). Skips hidden occurrences and
+    occurrences whose component owns no direct bodies (pure subassembly
+    containers), which flattens nested designs to one link per leaf
+    component instead of rejecting them.
+    """
+    try:
+        all_occs = getattr(root, 'allOccurrences', None)
+        if all_occs is None:
+            all_occs = root.occurrences
+    except Exception:
+        return
+    try:
+        items = list(all_occs)
+    except Exception:
+        try:
+            items = [all_occs.item(i) for i in range(all_occs.count)]
+        except Exception:
+            return
+    for occ in items:
+        try:
+            if not occurrence_visible(occ):
+                continue
+            bodies = _occurrence_bodies(occ)
+            # Only the component's *direct* bodies count: containers with
+            # nested occurrences but no bodies of their own are structure,
+            # not links (Adriaeik's structure-only assemblies).
+            try:
+                component = getattr(occ, 'component', None)
+                direct = getattr(component, 'bRepBodies', None) if component is not None else None
+                direct_count = direct.count if direct is not None else 0
+            except Exception:
+                direct_count = 0
+            if direct_count > 0:
+                yield occ
+        except Exception:
+            continue
+
+
 def _force_millimeter_stl(stl_options):
     """Best-effort: force STL export units to millimeters.
 
@@ -184,55 +247,82 @@ def copy_occs(root):
             pass
 
 
-def export_stl(design, save_dir, components):  
+def export_stl(design, save_dir, components, config=None):
     """
     export stl files into "save_dir/"
-    
+
+    WYSIWYG: exports leaf occurrences directly in their design pose without
+    duplicating components (non-destructive default). Set
+    ``use_legacy_copy`` in xacro_export.toml to restore the old copy_occs
+    flow for legacy debugging.
+
     Parameters
     ----------
     design: adsk.fusion.Design.cast(product)
     save_dir: str
         directory path to save
     components: design.allComponents
+    config: dict or None
     """
-          
+
     # create a single exportManager instance
     exportMgr = design.exportManager
     # get the script location
     import os
     os.makedirs(os.path.join(save_dir, 'meshes'), exist_ok=True)
     scriptDir = os.path.join(save_dir, 'meshes')
+    try:
+        from . import config as config_mod
+        refinement = config_mod.mesh_refinement_value(config or {}, adsk.fusion)
+    except Exception:
+        refinement = None
     exported = set()
+    try:
+        root = design.rootComponent
+    except Exception:
+        root = None
+    occurrences = list(iter_link_occurrences(root)) if root is not None else []
+    if not occurrences:
+        # Fallback to the legacy component walk when occurrence iteration
+        # is unavailable (very old API shapes).
+        for component in components:
+            try:
+                allOccus = component.allOccurrences
+            except Exception:
+                continue
+            for occ in allOccus:
+                occurrences.append(occ)
     # export the occurrence one by one in the component to a specified file
-    for component in components:
+    for occ in occurrences:
         try:
-            allOccus = component.allOccurrences
+            comp_name = occ.component.name
         except Exception:
             continue
-        for occ in allOccus:
-            try:
-                comp_name = occ.component.name
-            except Exception:
-                continue
-            if 'old_component' in comp_name:
-                continue
-            safe_name = sanitize_name(comp_name)
-            if safe_name in exported:
-                continue
-            try:
-                print(comp_name)
-                fileName = os.path.join(scriptDir, safe_name)
-                # create stl exportOptions
-                stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
-                stlExportOptions.sendToPrintUtility = False
-                stlExportOptions.isBinaryFormat = True
-                # options are .MeshRefinementLow .MeshRefinementMedium .MeshRefinementHigh
+        if 'old_component' in comp_name:
+            continue
+        if not occurrence_visible(occ):
+            continue
+        safe_name = sanitize_name(comp_name)
+        # base_link keeps its canonical mesh name.
+        if safe_name in exported:
+            continue
+        try:
+            print(comp_name)
+            fileName = os.path.join(scriptDir, safe_name)
+            # create stl exportOptions
+            stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
+            stlExportOptions.sendToPrintUtility = False
+            stlExportOptions.isBinaryFormat = True
+            # options are .MeshRefinementLow .MeshRefinementMedium .MeshRefinementHigh
+            if refinement is not None:
+                stlExportOptions.meshRefinement = refinement
+            else:
                 stlExportOptions.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementLow
-                _force_millimeter_stl(stlExportOptions)
-                exportMgr.execute(stlExportOptions)
-                exported.add(safe_name)
-            except Exception:
-                print('Component ' + comp_name + ' has something wrong.')
+            _force_millimeter_stl(stlExportOptions)
+            exportMgr.execute(stlExportOptions)
+            exported.add(safe_name)
+        except Exception:
+            print('Component ' + comp_name + ' has something wrong.')
 
 
 def file_dialog(ui):     
@@ -269,7 +359,11 @@ def origin2center_of_mass(inertia, center_of_mass, mass):
     z = center_of_mass[2]
     translation_matrix = [y**2 + z**2, x**2 + z**2, x**2 + y**2,
                          -x*y, -y*z, -x*z]
-    return [round(i - mass*t, 6) for i, t in zip(inertia, translation_matrix)]
+    # No rounding here: tiny mechanisms (screws, sensor heads) have inertia
+    # far below 1e-6 kg m^2 and round(x, 6) truncates them to exactly zero
+    # (fixed upstream by newtonjeri with scientific notation). Display
+    # formatting lives in transforms.format_float.
+    return [i - mass*t for i, t in zip(inertia, translation_matrix)]
 
 
 def prettify(elem):

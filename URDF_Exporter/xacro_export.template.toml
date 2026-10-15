@@ -1,0 +1,29 @@
+# Copy to xacro_export.toml next to URDF_Exporter.py to configure exports.
+# All keys are optional; missing/invalid values fall back to the defaults below.
+
+# '1' | '2' | 'both' (default 'both'). One export produces ROS1 files,
+# ROS2 files, or both (ROS2 overwrites package.xml/CMakeLists.txt last).
+ros_version = "both"
+
+# Fusion STL mesh refinement: 'low' | 'medium' | 'high' (default 'low').
+mesh_refinement = "low"
+
+# 'visual' (default) reuses the visual mesh for collision (legacy behavior).
+# 'primitive_box' fits an oriented box from the Fusion bounding box for cheap
+# physics while keeping the detailed visual mesh.
+collision_method = "visual"
+
+# Joint limit effort/velocity written into <limit> (defaults 100.0).
+effort = 100.0
+velocity = 100.0
+
+# False (default) exports meshes WYSIWYG without touching the design.
+# True restores the legacy copy_occs flow (duplicates components, renames
+# originals to old_component) for legacy debugging.
+use_legacy_copy = false
+
+# Emit ROS1 transmissions/gazebo tags (default true).
+export_transmissions_ros1 = true
+
+# Emit ros2_control xacro (default true).
+export_ros2_control = true

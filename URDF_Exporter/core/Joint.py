@@ -8,9 +8,19 @@ Created on Sun May 12 20:17:17 2019
 import adsk
 from xml.etree.ElementTree import Element, SubElement
 from ..utils import utils
+from ..utils import transforms as tf
+
+
+def _effort_velocity(config):
+    try:
+        return float((config or {}).get('effort', 100.0)), float((config or {}).get('velocity', 100.0))
+    except Exception:
+        return 100.0, 100.0
+
 
 class Joint:
-    def __init__(self, name, xyz, axis, parent, child, joint_type, upper_limit, lower_limit):
+    def __init__(self, name, xyz, axis, parent, child, joint_type, upper_limit, lower_limit,
+                 rpy=None, effort=100, velocity=100):
         """
         Attributes
         ----------
@@ -34,6 +44,7 @@ class Joint:
         self.name = name
         self.type = joint_type
         self.xyz = xyz
+        self.rpy = list(rpy) if rpy is not None else [0, 0, 0]
         self.parent = parent
         self.child = child
         self.joint_xml = None
@@ -41,6 +52,14 @@ class Joint:
         self.axis = axis  # for 'revolute' and 'continuous'
         self.upper_limit = upper_limit  # for 'revolute' and 'prismatic'
         self.lower_limit = lower_limit  # for 'revolute' and 'prismatic'
+        try:
+            self.effort = float(effort)
+        except Exception:
+            self.effort = 100.0
+        try:
+            self.velocity = float(velocity)
+        except Exception:
+            self.velocity = 100.0
         
     def make_joint_xml(self):
         """
@@ -50,7 +69,8 @@ class Joint:
         joint.attrib = {'name':self.name, 'type':self.type}
         
         origin = SubElement(joint, 'origin')
-        origin.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]), 'rpy':'0 0 0'}
+        origin.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]),
+                         'rpy': tf.format_vector(self.rpy or [0, 0, 0])}
         parent = SubElement(joint, 'parent')
         parent.attrib = {'link':self.parent}
         child = SubElement(joint, 'child')
@@ -60,8 +80,8 @@ class Joint:
             axis.attrib = {'xyz':' '.join([str(_) for _ in self.axis])}
         if self.type == 'revolute' or self.type == 'prismatic':
             limit = SubElement(joint, 'limit')
-            limit.attrib = {'upper': str(self.upper_limit), 'lower': str(self.lower_limit),
-                            'effort': '100', 'velocity': '100'}
+            limit.attrib = {'upper': tf.format_float(self.upper_limit), 'lower': tf.format_float(self.lower_limit),
+                            'effort': tf.format_float(self.effort), 'velocity': tf.format_float(self.velocity)}
             
         self.joint_xml = "\n".join(utils.prettify(joint).split("\n")[1:])
 
@@ -98,7 +118,7 @@ class Joint:
         self.tran_xml = "\n".join(utils.prettify(tran).split("\n")[1:])
 
 
-def make_joints_dict(root, msg):
+def make_joints_dict(root, msg, config=None):
     """
     joints_dict holds parent, axis and xyz informatino of the joints
 
@@ -109,16 +129,19 @@ def make_joints_dict(root, msg):
         Root component
     msg: str
         Tell the status
+    config: dict or None
+        Export config (effort/velocity). Defaults preserve legacy output.
 
     Returns
     ----------
     joints_dict:
-        {name: {type, axis, upper_limit, lower_limit, parent, child, xyz}}
+        {name: {type, axis, upper_limit, lower_limit, parent, child, xyz, rpy}}
     msg: str
         Tell the status
     """
 
     joints_dict = {}
+    effort, velocity = _effort_velocity(config)
 
     def iter_joints():
         try:
@@ -158,8 +181,8 @@ def make_joints_dict(root, msg):
         # support  "Revolute", "Rigid" and "Slider"
         if joint_type == 'revolute':
             try:
-                joint_dict['axis'] = [round(i, 6) for i in
-                    joint.jointMotion.rotationAxisVector.asArray()]  # In Fusion, exported axis is normalized.
+                raw_axis = list(
+                    joint.jointMotion.rotationAxisVector.asArray())  # In Fusion, exported axis is normalized.
             except Exception:
                 msg = joint.name + ' has an unreadable rotation axis.'
                 break
@@ -176,11 +199,12 @@ def make_joints_dict(root, msg):
                 break
             else:  # if there is no angle limit
                 joint_dict['type'] = 'continuous'
+            joint_dict['_raw_axis'] = raw_axis
 
         elif joint_type == 'prismatic':
             try:
-                joint_dict['axis'] = [round(i, 6) for i in
-                    joint.jointMotion.slideDirectionVector.asArray()]  # Also normalized
+                raw_axis = list(
+                    joint.jointMotion.slideDirectionVector.asArray())  # Also normalized
             except Exception:
                 msg = joint.name + ' has an unreadable slide direction.'
                 break
@@ -195,6 +219,7 @@ def make_joints_dict(root, msg):
             elif not max_enabled and min_enabled:
                 msg = joint.name + 'is not set its upper limit. Please set it and try again.'
                 break
+            joint_dict['_raw_axis'] = raw_axis
         elif joint_type == 'fixed':
             pass
 
@@ -235,6 +260,19 @@ def make_joints_dict(root, msg):
         except Exception:
             msg = joint.name + " doesn't have joint origin. Please set it and run again."
             break
+
+        # Joint orientation: child occurrence pose in the parent occurrence
+        # frame (R_parent^-1 * R_child). Identity when Fusion rotations are
+        # unavailable, which preserves legacy translation-only output.
+        joint_dict['rpy'] = _joint_rpy_for(joint)
+        # Joint axis is authored in the design frame; express it in the
+        # parent link frame so the URDF stays correct when the parent is
+        # rotated (Adriaeik's axis-against-link-frame rule).
+        if '_raw_axis' in joint_dict:
+            raw_axis = joint_dict.pop('_raw_axis')
+            joint_dict['axis'] = _axis_in_parent_frame(raw_axis, occ_two)
+        joint_dict['effort'] = effort
+        joint_dict['velocity'] = velocity
 
         name = utils.sanitize_name(joint.name)
         if name in joints_dict:
@@ -416,3 +454,41 @@ def _resolve_asbuilt_xyz_cm(joint):
         except Exception:
             continue
     return None
+
+
+def _joint_rpy_for(joint):
+    """Child occurrence orientation in the parent occurrence frame.
+
+    Returns [roll, pitch, yaw] in radians, or [0, 0, 0] when Fusion
+    rotations are unavailable (legacy translation-only behavior).
+    """
+    try:
+        parent_matrix = utils.occurrence_matrix_array(joint.occurrenceTwo)
+        child_matrix = utils.occurrence_matrix_array(joint.occurrenceOne)
+        if parent_matrix is None or child_matrix is None:
+            return [0, 0, 0]
+        pose = tf.relative_pose(parent_matrix, child_matrix)
+        if pose is None:
+            return [0, 0, 0]
+        _, rpy = pose
+        return [round(float(v), 6) for v in rpy]
+    except Exception:
+        return [0, 0, 0]
+
+
+def _axis_in_parent_frame(axis_global, parent_occ):
+    """Express a design-frame axis in the parent occurrence frame."""
+    try:
+        parent_matrix = utils.occurrence_matrix_array(parent_occ)
+        axis = tf.normalize([float(v) for v in axis_global])
+        if parent_matrix is None:
+            return [round(v, 6) for v in axis]
+        parent_rot = tf.rotation3_from_array16(parent_matrix)
+        axis_parent = tf.rotate_vector_by_mat3(axis, tf.mat3_transpose(parent_rot))
+        axis_parent = tf.normalize(axis_parent)
+        return [round(v, 6) for v in axis_parent]
+    except Exception:
+        try:
+            return [round(float(v), 6) for v in axis_global]
+        except Exception:
+            return [0, 0, 0]
