@@ -5,7 +5,7 @@ Created on Sun May 12 20:11:28 2019
 @author: syuntoku
 """
 
-import adsk, re
+import adsk
 from xml.etree.ElementTree import Element, SubElement
 from ..utils import utils
 
@@ -105,23 +105,36 @@ def make_inertial_dict(root, msg):
     for occs in allOccs:
         # Skip the root component.
         occs_dict = {}
-        prop = occs.getPhysicalProperties(adsk.fusion.CalculationAccuracy.VeryHighCalculationAccuracy)
+        try:
+            prop = occs.getPhysicalProperties(adsk.fusion.CalculationAccuracy.VeryHighCalculationAccuracy)
+        except Exception:
+            continue
         
-        occs_dict['name'] = re.sub('[ :()]', '_', occs.name)
+        occs_dict['name'] = utils.sanitize_name(occs.name)
 
         mass = prop.mass  # kg
         occs_dict['mass'] = mass
-        center_of_mass = [_/100.0 for _ in prop.centerOfMass.asArray()] ## cm to m
+        try:
+            center_of_mass = [_/100.0 for _ in prop.centerOfMass.asArray()] ## cm to m
+        except Exception:
+            center_of_mass = [0.0, 0.0, 0.0]
         occs_dict['center_of_mass'] = center_of_mass
 
         # https://help.autodesk.com/view/fusion360/ENU/?guid=GUID-ce341ee6-4490-11e5-b25b-f8b156d7cd97
-        (_, xx, yy, zz, xy, yz, xz) = prop.getXYZMomentsOfInertia()
-        moment_inertia_world = [_ / 10000.0 for _ in [xx, yy, zz, xy, yz, xz] ] ## kg / cm^2 -> kg/m^2
-        occs_dict['inertia'] = utils.origin2center_of_mass(moment_inertia_world, center_of_mass, mass)
+        try:
+            (_, xx, yy, zz, xy, yz, xz) = prop.getXYZMomentsOfInertia()
+            moment_inertia_world = [_ / 10000.0 for _ in [xx, yy, zz, xy, yz, xz] ] ## kg / cm^2 -> kg/m^2
+            occs_dict['inertia'] = utils.origin2center_of_mass(moment_inertia_world, center_of_mass, mass)
+        except Exception:
+            occs_dict['inertia'] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         
-        if occs.component.name == 'base_link':
+        try:
+            component_name = occs.component.name
+        except Exception:
+            component_name = ''
+        if component_name == 'base_link':
             inertial_dict['base_link'] = occs_dict
         else:
-            inertial_dict[re.sub('[ :()]', '_', occs.name)] = occs_dict
+            inertial_dict[utils.sanitize_name(occs.name)] = occs_dict
 
     return inertial_dict, msg

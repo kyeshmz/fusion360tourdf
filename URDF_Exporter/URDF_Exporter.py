@@ -30,7 +30,7 @@ def run(context):
         ui = app.userInterface
         product = app.activeProduct
         design = adsk.fusion.Design.cast(product)
-        title = 'Fusion2URDF'
+        title = 'fusion360tourdf'
         if not design:
             ui.messageBox('No active Fusion design', title)
             return
@@ -39,18 +39,17 @@ def run(context):
         components = design.allComponents
 
         # set the names        
-        robot_name = root.name.split()[0]
+        robot_name = utils.sanitize_name(root.name.split()[0])
         package_name = robot_name + '_description'
         save_dir = utils.file_dialog(ui)
         if save_dir == False:
-            ui.messageBox('Fusion2URDF was canceled', title)
+            ui.messageBox('fusion360tourdf was canceled', title)
             return 0
         
-        save_dir = save_dir + '/' + package_name
-        try: os.mkdir(save_dir)
-        except: pass     
+        save_dir = os.path.join(save_dir, package_name)
+        os.makedirs(save_dir, exist_ok=True)
 
-        package_dir = os.path.abspath(os.path.dirname(__file__)) + '/package/'
+        package_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'package')
         
         # --------------------
         # set dictionaries

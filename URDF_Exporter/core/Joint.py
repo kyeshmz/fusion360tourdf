@@ -5,7 +5,7 @@ Created on Sun May 12 20:17:17 2019
 @author: syuntoku
 """
 
-import adsk, re
+import adsk
 from xml.etree.ElementTree import Element, SubElement
 from ..utils import utils
 
@@ -101,46 +101,71 @@ class Joint:
 def make_joints_dict(root, msg):
     """
     joints_dict holds parent, axis and xyz informatino of the joints
-    
-    
+
+
     Parameters
     ----------
     root: adsk.fusion.Design.cast(product)
         Root component
     msg: str
         Tell the status
-        
+
     Returns
     ----------
-    joints_dict: 
+    joints_dict:
         {name: {type, axis, upper_limit, lower_limit, parent, child, xyz}}
     msg: str
         Tell the status
     """
 
-    joint_type_list = [
-    'fixed', 'revolute', 'prismatic', 'Cylinderical',
-    'PinSlot', 'Planner', 'Ball']  # these are the names in urdf
-
     joints_dict = {}
-    
-    for joint in root.joints:
+
+    def iter_joints():
+        try:
+            for joint in root.joints:
+                yield joint, False
+        except Exception:
+            return
+        try:
+            as_built = getattr(root, 'asBuiltJoints', None)
+            if as_built is not None:
+                for joint in as_built:
+                    yield joint, True
+        except Exception:
+            return
+
+    for joint, is_as_built in iter_joints():
         joint_dict = {}
-        joint_type = joint_type_list[joint.jointMotion.jointType]
+        try:
+            type_value = _joint_type_value(joint.jointMotion)
+        except Exception:
+            msg = getattr(joint, 'name', 'joint') + ' has an unreadable joint type.'
+            break
+        joint_type = _urdf_type_for(type_value)
+        if joint_type is None:
+            fusion_name = _FUSION_JOINT_NAMES.get(type_value, str(type_value))
+            msg = (getattr(joint, 'name', 'joint') +
+                   ' uses ' + fusion_name + ' joints, which URDF does not support.'
+                   ' Please use Rigid, Revolute, or Slider joints.')
+            break
         joint_dict['type'] = joint_type
-        
+
         # swhich by the type of the joint
         joint_dict['axis'] = [0, 0, 0]
         joint_dict['upper_limit'] = 0.0
         joint_dict['lower_limit'] = 0.0
-        
+
         # support  "Revolute", "Rigid" and "Slider"
         if joint_type == 'revolute':
-            joint_dict['axis'] = [round(i, 6) for i in \
-                joint.jointMotion.rotationAxisVector.asArray()] ## In Fusion, exported axis is normalized.
+            try:
+                joint_dict['axis'] = [round(i, 6) for i in
+                    joint.jointMotion.rotationAxisVector.asArray()]  # In Fusion, exported axis is normalized.
+            except Exception:
+                msg = joint.name + ' has an unreadable rotation axis.'
+                break
             max_enabled = joint.jointMotion.rotationLimits.isMaximumValueEnabled
-            min_enabled = joint.jointMotion.rotationLimits.isMinimumValueEnabled            
-            if max_enabled and min_enabled:  
+            min_enabled = joint.jointMotion.rotationLimits.isMinimumValueEnabled
+            if max_enabled and min_enabled:
                 joint_dict['upper_limit'] = round(joint.jointMotion.rotationLimits.maximumValue, 6)
                 joint_dict['lower_limit'] = round(joint.jointMotion.rotationLimits.minimumValue, 6)
             elif max_enabled and not min_enabled:
@@ -151,15 +176,19 @@ def make_joints_dict(root, msg):
                 break
             else:  # if there is no angle limit
                 joint_dict['type'] = 'continuous'
-                
+
         elif joint_type == 'prismatic':
-            joint_dict['axis'] = [round(i, 6) for i in \
-                joint.jointMotion.slideDirectionVector.asArray()]  # Also normalized
+            try:
+                joint_dict['axis'] = [round(i, 6) for i in
+                    joint.jointMotion.slideDirectionVector.asArray()]  # Also normalized
+            except Exception:
+                msg = joint.name + ' has an unreadable slide direction.'
+                break
             max_enabled = joint.jointMotion.slideLimits.isMaximumValueEnabled
-            min_enabled = joint.jointMotion.slideLimits.isMinimumValueEnabled            
-            if max_enabled and min_enabled:  
-                joint_dict['upper_limit'] = round(joint.jointMotion.slideLimits.maximumValue/100, 6)
-                joint_dict['lower_limit'] = round(joint.jointMotion.slideLimits.minimumValue/100, 6)
+            min_enabled = joint.jointMotion.slideLimits.isMinimumValueEnabled
+            if max_enabled and min_enabled:
+                joint_dict['upper_limit'] = round(joint.jointMotion.slideLimits.maximumValue / 100, 6)
+                joint_dict['lower_limit'] = round(joint.jointMotion.slideLimits.minimumValue / 100, 6)
             elif max_enabled and not min_enabled:
                 msg = joint.name + 'is not set its lower limit. Please set it and try again.'
                 break
@@ -168,64 +197,222 @@ def make_joints_dict(root, msg):
                 break
         elif joint_type == 'fixed':
             pass
-        
-        if joint.occurrenceTwo.component.name == 'base_link':
-            joint_dict['parent'] = 'base_link'
-        else:
-            joint_dict['parent'] = re.sub('[ :()]', '_', joint.occurrenceTwo.name)
-        joint_dict['child'] = re.sub('[ :()]', '_', joint.occurrenceOne.name)
-        
-        
+
+        try:
+            occ_two = joint.occurrenceTwo
+            occ_one = joint.occurrenceOne
+        except Exception:
+            msg = joint.name + " doesn't reference two occurrences. Please set it and run again."
+            break
+        try:
+            if occ_two.component.name == 'base_link':
+                joint_dict['parent'] = 'base_link'
+            else:
+                joint_dict['parent'] = utils.sanitize_name(occ_two.name)
+        except Exception:
+            msg = joint.name + ' has an unreadable parent occurrence.'
+            break
+        try:
+            joint_dict['child'] = utils.sanitize_name(occ_one.name)
+        except Exception:
+            msg = joint.name + ' has an unreadable child occurrence.'
+            break
+
+
         #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
         #https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
         #Thanks to Masaki Yamamoto!
-        
-        # Coordinate transformation by matrix
-        # M: 4x4 transformation matrix
-        # a: 3D vector
-        def trans(M, a):
-            ex = [M[0],M[4],M[8]]
-            ey = [M[1],M[5],M[9]]
-            ez = [M[2],M[6],M[10]]
-            oo = [M[3],M[7],M[11]]
-            b = [0, 0, 0]
-            for i in range(3):
-                b[i] = a[0]*ex[i]+a[1]*ey[i]+a[2]*ez[i]+oo[i]
-            return(b)
-
-
-        # Returns True if two arrays are element-wise equal within a tolerance
-        def allclose(v1, v2, tol=1e-6):
-            return( max([abs(a-b) for a,b in zip(v1, v2)]) < tol )
+        # Update: Occurrence.transform was retired in July 2025; use transform2.
+        # geometryOneTransform/geometryTwoTransform are used as a fallback when
+        # joint geometry is no longer available.
 
         try:
-            xyz_from_one_to_joint = joint.geometryOrOriginOne.origin.asArray() # Relative Joint pos
-            xyz_from_two_to_joint = joint.geometryOrOriginTwo.origin.asArray() # Relative Joint pos
-            xyz_of_one            = joint.occurrenceOne.transform.translation.asArray() # Link origin
-            xyz_of_two            = joint.occurrenceTwo.transform.translation.asArray() # Link origin
-            M_two = joint.occurrenceTwo.transform.asArray() # Matrix as a 16 element array.
+            xyz_of_joint_cm = _resolve_joint_xyz_cm(joint, is_as_built)
+            if xyz_of_joint_cm is None:
+                raise ValueError('no origin')
+            joint_dict['xyz'] = [round(i / 100.0, 6) for i in xyz_of_joint_cm]  # converted to meter
 
-        # Compose joint position
-            case1 = allclose(xyz_from_two_to_joint, xyz_from_one_to_joint)
-            case2 = allclose(xyz_from_two_to_joint, xyz_of_one)
-            if case1 or case2:
-                xyz_of_joint = xyz_from_two_to_joint
-            else:
-                xyz_of_joint = trans(M_two, xyz_from_two_to_joint)
+        except Exception:
+            msg = joint.name + " doesn't have joint origin. Please set it and run again."
+            break
 
-
-            joint_dict['xyz'] = [round(i / 100.0, 6) for i in xyz_of_joint]  # converted to meter
-
-        except:
-            try:
-                if type(joint.geometryOrOriginTwo)==adsk.fusion.JointOrigin:
-                    data = joint.geometryOrOriginTwo.geometry.origin.asArray()
-                else:
-                    data = joint.geometryOrOriginTwo.origin.asArray()
-                joint_dict['xyz'] = [round(i / 100.0, 6) for i in data]  # converted to meter
-            except:
-                msg = joint.name + " doesn't have joint origin. Please set it and run again."
-                break
-        
-        joints_dict[joint.name] = joint_dict
+        name = utils.sanitize_name(joint.name)
+        if name in joints_dict:
+            suffix = '_asbuilt' if is_as_built else '_2'
+            candidate = name + suffix
+            counter = 2
+            while candidate in joints_dict:
+                counter += 1
+                candidate = name + '_' + str(counter)
+            name = candidate
+        joints_dict[name] = joint_dict
     return joints_dict, msg
+
+
+# Fusion JointTypes enum values, see
+# https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_JointTypes.htm
+# 0 Rigid, 1 Revolute, 2 Slider, 3 Cylindrical, 4 PinSlot, 5 Planar, 6 Ball,
+# 7 Inferred.
+_FUSION_JOINT_NAMES = {
+    0: 'Rigid',
+    1: 'Revolute',
+    2: 'Slider',
+    3: 'Cylindrical',
+    4: 'PinSlot',
+    5: 'Planar',
+    6: 'Ball',
+    7: 'Inferred',
+}
+
+_FUSION_TO_URDF = {
+    0: 'fixed',
+    1: 'revolute',
+    2: 'prismatic',
+}
+
+
+def _joint_type_value(joint_motion):
+    """Return the integer JointTypes value for a joint motion."""
+    joint_type = joint_motion.jointType
+    for attr in ('value', 'value__'):
+        try:
+            value = getattr(joint_type, attr, None)
+            if isinstance(value, int):
+                return value
+        except Exception:
+            continue
+    try:
+        return int(joint_type)
+    except Exception:
+        pass
+    class_name = type(joint_motion).__name__
+    by_class = {
+        'RigidJointMotion': 0,
+        'RevoluteJointMotion': 1,
+        'SliderJointMotion': 2,
+        'CylindricalJointMotion': 3,
+        'PinSlotJointMotion': 4,
+        'PlanarJointMotion': 5,
+        'BallJointMotion': 6,
+    }
+    if class_name in by_class:
+        return by_class[class_name]
+    raise ValueError('Unknown joint type: %r' % (joint_type,))
+
+
+def _urdf_type_for(type_value):
+    """Map a Fusion JointTypes value to a URDF joint type or None."""
+    return _FUSION_TO_URDF.get(type_value)
+
+
+def _origin_array(origin_like):
+    """Return a 3-element array from a JointGeometry/JointOrigin/Point."""
+    if origin_like is None:
+        return None
+    for attr in ('origin', 'geometry', 'point'):
+        try:
+            candidate = getattr(origin_like, attr, None)
+            if candidate is None:
+                continue
+            if callable(candidate):
+                candidate = candidate()
+            if hasattr(candidate, 'asArray'):
+                return list(candidate.asArray())
+            if hasattr(candidate, 'origin') and hasattr(candidate.origin, 'asArray'):
+                return list(candidate.origin.asArray())
+        except Exception:
+            continue
+    try:
+        if hasattr(origin_like, 'asArray'):
+            return list(origin_like.asArray())
+    except Exception:
+        pass
+    return None
+
+
+def _matrix_translation_cm(matrix):
+    if matrix is None:
+        return None
+    try:
+        if callable(matrix):
+            matrix = matrix()
+        translation = getattr(matrix, 'translation', None)
+        if translation is None:
+            return None
+        if callable(translation):
+            translation = translation()
+        return list(translation.asArray())
+    except Exception:
+        return None
+
+
+def _resolve_joint_xyz_cm(joint, is_as_built):
+    """Return the joint position in cm in the root frame, or None."""
+    if is_as_built:
+        return _resolve_asbuilt_xyz_cm(joint)
+    return _resolve_standard_xyz_cm(joint)
+
+
+def _resolve_standard_xyz_cm(joint):
+    # Primary path: joint origins relative to each occurrence, composed
+    # with the occurrence transform (transform2, retired transform fallback).
+    try:
+        one = getattr(joint, 'geometryOrOriginOne', None)
+        two = getattr(joint, 'geometryOrOriginTwo', None)
+        xyz_from_one = _origin_array(one)
+        xyz_from_two = _origin_array(two)
+        xyz_of_one = utils.occurrence_translation(joint.occurrenceOne)
+        matrix_two = utils.occurrence_matrix_array(joint.occurrenceTwo)
+        if xyz_from_one is not None and xyz_from_two is not None:
+            if xyz_of_one is not None and matrix_two is not None:
+                if utils.arrays_close(xyz_from_two, xyz_from_one) or \
+                        utils.arrays_close(xyz_from_two, xyz_of_one):
+                    return list(xyz_from_two)
+                return utils.transform_point(matrix_two, xyz_from_two)
+            return list(xyz_from_two)
+    except Exception:
+        pass
+
+    # Fallback 1: explicit joint-geometry transforms (survive model edits
+    # that invalidate the original joint geometry).
+    for attr in ('geometryTwoTransform', 'geometryOneTransform'):
+        try:
+            matrix = getattr(joint, attr, None)
+            translation = _matrix_translation_cm(matrix)
+            if translation is not None:
+                return list(translation)
+        except Exception:
+            continue
+
+    # Fallback 2: JointOrigin wrapper around geometry.
+    try:
+        two = getattr(joint, 'geometryOrOriginTwo', None)
+        if two is not None and 'JointOrigin' in type(two).__name__:
+            data = _origin_array(getattr(two, 'geometry', None))
+            if data is not None:
+                return list(data)
+        data = _origin_array(two)
+        if data is not None:
+            return list(data)
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_asbuilt_xyz_cm(joint):
+    for attr in ('geometry', 'transform'):
+        try:
+            candidate = getattr(joint, attr, None)
+            if candidate is None:
+                continue
+            if attr == 'transform':
+                translation = _matrix_translation_cm(candidate)
+                if translation is not None:
+                    return list(translation)
+                continue
+            data = _origin_array(candidate)
+            if data is not None:
+                return list(data)
+        except Exception:
+            continue
+    return None

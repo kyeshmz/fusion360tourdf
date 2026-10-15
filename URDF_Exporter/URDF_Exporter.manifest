@@ -1,9 +1,9 @@
 {
 	"autodeskProduct":	"Fusion360",
 	"type":	"script",
-	"author":	"syuntoku14",
+	"author":	"fusion360tourdf contributors (fork of syuntoku14/fusion2urdf)",
 	"description":	{
-		"":	"Export stl and URDF file"
+		"":	"Export STL and URDF from Fusion 360 (transform2 compatible)"
 	},
 	"supportedOS":	"windows|mac",
 	"editEnabled":	true
