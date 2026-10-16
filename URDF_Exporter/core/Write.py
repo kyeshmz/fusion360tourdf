@@ -5,7 +5,7 @@ Created on Sun May 12 20:46:26 2019
 @author: syuntoku
 """
 
-import adsk, os
+import os
 from xml.etree.ElementTree import Element, SubElement
 from . import Link, Joint
 from ..utils import utils
@@ -18,17 +18,6 @@ def _effort_velocity(config):
         return float((config or {}).get('effort', 100.0)), float((config or {}).get('velocity', 100.0))
     except Exception:
         return 100.0, 100.0
-
-
-def _joint_origin_xyz(joints_dict, links_xyz_dict, parent, child):
-    try:
-        return [round(p - c, 6) for p, c in
-                zip(links_xyz_dict[parent], links_xyz_dict[child])]  # xyz = parent - child
-    except KeyError:
-        raise RuntimeError(
-            "There seems to be an error with the connection between\n\n%s\nand\n%s\n\nCheck "
-            "whether the connections\nparent=component2=%s\nchild=component1=%s\nare correct or if you need "
-            "to swap component1<=>component2" % (parent, child, parent, child))
 
 
 def _link_frames(joints_dict):
