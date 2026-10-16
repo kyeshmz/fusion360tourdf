@@ -139,6 +139,36 @@ ros2 launch <robot>_description display.launch.py
 python3 -m unittest discover -s tests -v
 ```
 
+## Validating output (URDF lint / schema)
+
+This exporter emits URDF/xacro (not Pixar USD). URDF has no single
+published XSD; the de-facto validator is **`check_urdf`** from urdfdom:
+
+```bash
+# Expand xacro first, then validate (needs ROS or the apt package):
+rosrun xacro xacro bot.xacro > bot.urdf
+check_urdf bot.urdf
+# or: apt install liburdfdom-tools  |  conda install -c conda-forge urdfdom
+# pip-only parse check: pip install yourdfpy  (or urdf_parser_py)
+```
+
+No ROS here? Use the bundled stdlib-only linter (no dependencies).
+It checks well-formed XML, link/joint references, origins, axes, limits,
+tree shape (one root, no cycles/double-parents), and mesh existence:
+
+```bash
+python3 tools/validate_urdf.py <robot>.xacro --meshes <robot>_description/meshes
+python3 tools/validate_urdf.py path/to/robot.urdf --strict
+```
+
+Exit 0 = no errors (warnings ok); `--strict` also fails on warnings.
+`<xacro:include filename="$(find ...)"/>` lines are skipped offline and
+reported — expand with ROS xacro for end-to-end validation.
+
+If you actually meant Pixar USD (`.usda/.usdc`), the equivalent is
+**`usdchecker`** from OpenUSD (`pip install usd-core`), plus
+`Usd.Stage.Open()` round-trip / `usdview`. This repo does not emit USD.
+
 ## Credits
 
 Upstream work by Toshinori Kitamura and contributors under MIT
