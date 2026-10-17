@@ -1,0 +1,73 @@
+{
+  "scope": "Fusion input to ROS 2 URDF; no PyBullet, other CAD, MJCF, SDF or simulator-specific output",
+  "audit_date": "2026-10-17",
+  "evidence_kind": "source inspection at pinned revisions, not native Fusion execution",
+  "repositories": [
+    {
+      "repository": "syuntoku14/fusion2urdf",
+      "revision": "21fd3050752c2baa62dfdc1bfa05ec51fc472122",
+      "sources": ["URDF_Exporter/core/Joint.py", "URDF_Exporter/core/Link.py", "URDF_Exporter/utils/utils.py", "README.md"],
+      "relevant_cases": ["flat assemblies", "ordinary joints", "capture-history workaround", "physical properties", "STL export"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "dheena2k2/fusion2urdf-ros2",
+      "revision": "8e883d2d66529a77c67edc28d29f2c3ba96169f6",
+      "sources": ["URDF_Exporter_Ros2/core/Joint.py", "URDF_Exporter_Ros2/core/Link.py", "URDF_Exporter_Ros2/utils/utils.py", "README.md"],
+      "relevant_cases": ["flat assemblies", "ordinary joints", "capture-history workaround", "ROS 2 package generation"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "haoyan-dev/fusion2urdf",
+      "revision": "dc7a2e657ccf4f44b68e52e157067958f3de99c7",
+      "sources": ["URDF_Exporter/core/Joint.py", "URDF_Exporter/core/Link.py", "URDF_Exporter/utils/utils.py", "URDF_Exporter/utils/math_utils.py"],
+      "relevant_cases": ["nested collections", "explicit joint origins", "frame composition", "repeated-instance naming"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "Adriaeik/fusion2URDF",
+      "revision": "4411ffbdffc0364dc6f5922c40b3e14fd7b642f8",
+      "sources": ["core/fusion_extractor.py", "core/robot_model.py", "tests/test_frame_rebaser.py", "tests/test_export_pipeline.py"],
+      "relevant_cases": ["nested assemblies", "rigid-group merging", "root-body proxies", "appearance", "frame invariants", "partial visual failures"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "cadop/fusion360descriptor",
+      "revision": "4d28621a97e4e2c4be9a9dbecdfefb231813e9da",
+      "sources": ["Descriptor/core/parser.py", "Descriptor/core/io.py", "Descriptor/core/parts.py", "README.md"],
+      "relevant_cases": ["grounded or configured roots", "reversed endpoints", "rigid-group fixed edges", "merged links", "visible body selection", "pose mutation"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "ACDC4Robot/Fusion360",
+      "revision": "f1152d7b6fb067d25f82885f86ae7f79bbb45b5e",
+      "sources": ["Add-IN/ACDC4Robot/core/link_discovery.py", "Add-IN/ACDC4Robot/core/write.py", "Add-IN/ACDC4Robot/core/urdf.py", "Add-IN/ACDC4Robot/tools/FlattenOccs.py"],
+      "relevant_cases": ["ordinary and as-built discovery", "nested rigid subtrees", "active URDF versus unused helpers", "history-destructive optional flattening"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "runtimerobotics/fusion360-urdf-ros2",
+      "revision": "e317c5e00e1044996d19d5e4ff97431ed8816245",
+      "sources": ["Fusion_URDF_Exporter_ROS2/core/Joint.py", "Fusion_URDF_Exporter_ROS2/core/Link.py", "Fusion_URDF_Exporter_ROS2/utils/utils.py", "README.md"],
+      "relevant_cases": ["ordinary joints", "history workaround", "tiny inertia", "copy and rename side effects", "partial export failures"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "david-dorf/ExportURDF",
+      "revision": "bbf2af2a19e73052aee16b37270ef7318e1e579e",
+      "sources": ["Fusion360/FusionURDF.py", "Fusion360/README.md"],
+      "relevant_cases": ["as-built null geometry", "branch-order origins", "component identities", "inertia and slider units"],
+      "native_runtime_executed": false
+    },
+    {
+      "repository": "newtonjeri/fusion2urdf-master",
+      "revision": "5238bd60e90d3996f06d18f78463c624c4f7d617",
+      "sources": ["URDF_Exporter/core/Joint.py", "URDF_Exporter/core/Link.py", "URDF_Exporter/utils/utils.py", "README.md"],
+      "relevant_cases": ["nested geometry merging", "temporary direct-design staging", "appearance", "tiny inertia", "visibility and early termination"],
+      "native_runtime_executed": false
+    }
+  ],
+  "excluded": [
+    {"repository": "yanshil/Fusion2PyBullet", "reason": "User explicitly excluded PyBullet-specific use cases"}
+  ]
+}

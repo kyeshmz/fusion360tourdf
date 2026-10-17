@@ -151,35 +151,19 @@ def inverse_pose(xyz_m, rpy):
         return [-v for v in xyz_m], [0.0, 0.0, 0.0]
 
 
-def format_float(value, digits=6):
-    """Format a float compactly without truncating tiny physics values.
-
-    URDF inertia/mass values below 1e-6 (e.g. small screws, sensor heads)
-    were truncated to 0.0 by ``round(x, 6)`` in older exporters
-    (fixed upstream by newtonjeri with scientific notation). Uses general
-    format with 9 significant digits: round-trips through float() and
-    stays readable for normal magnitudes.
-    """
-    try:
-        f = float(value)
-    except Exception:
-        return '0'
+def format_float(value):
+    """Keep enough significant digits to round-trip physical values."""
+    f = float(value)
     if f == 0.0:
         return '0'
-    text = '{:.9g}'.format(f)
-    # Normalize -0 to 0 for cleaner URDF.
+    text = repr(f)
+    if text.endswith('.0'):
+        text = text[:-2]
     if text in ('-0', '-0.0'):
         return '0'
     return text
 
 
-def format_vector(vec, digits=6):
+def format_vector(vec):
     """Format an xyz/rpy vector for URDF attributes."""
-    rounded = []
-    for v in vec:
-        try:
-            rounded.append(round(float(v), digits))
-        except Exception:
-            rounded.append(0.0)
-    # Clean -0.0 for readability.
-    return ' '.join('0' if x == 0 else str(x) for x in rounded)
+    return ' '.join(format_float(v) for v in vec)

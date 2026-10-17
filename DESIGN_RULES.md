@@ -1,50 +1,55 @@
-# Design rules for fusion360tourdf exports
+# Model requirements
 
-Compact rules this exporter actually enforces. For the full philosophy
-(adaptive design styles, rigid groups, frame helpers, `!`-tags), see
-Adriaeik/fusion2URDF `DESIGN_RULES.md`, cadop/fusion360descriptor docs,
-and ACDC4Robot `InstructionsForAssembly.md`.
+## Assembly and topology
 
-## Must
+- One visible component occurrence represents one link. Repeated instances
+  need distinct occurrence identities and distinct posed mesh files.
+- Name the chassis `base_link` or select an exact `root_occurrence`. Root-owned
+  bodies can supply a synthetic base without exporting descendants twice.
+- The exporter orients edges outward from the chosen root. Component1 and
+  Component2 ordering need not be rebuilt just to reverse an edge.
+- Active rigid, revolute, and slider joints are supported. A locked joint,
+  including a generalized joint, is fixed at its current pose with provenance.
+  Other active joint types fail by name until their motion is implemented.
+- Every exported link must be reachable from `base_link`. Disconnected
+  geometry must not disappear silently.
+- Ground To Parent is a fixed constraint, not just a root-selection hint.
+  Physical parents and proven fixed ancestry are handled. Missing bodyless
+  parent/world frames remain explicit input gaps. Export does not clear flags
+  or weld geometry to an unproven world anchor.
+- URDF represents a tree. Additional loop-closing joints belong in
+  `config/robot_data.yaml`, not in the URDF tree. The sidecar does not enforce
+  physical constraints.
+- The same selected direct bodies supply meshes and physical properties.
+  Hiding a required constraint endpoint produces a named error rather than
+  silently changing the mechanism. Hiding only a joint marker does not suppress
+  that joint. Full context identity is retained even for excluded occurrences.
 
-1. **One component per link.** Leaf components become links; subassembly
-   containers (no direct bodies) are structure, not links. Nested
-   assemblies are flattened automatically (unlike upstream, which rejected
-   them).
-2. **Name the root chassis `base_link`** when modelling cleanly. Imported
-   CAD with loose bodies under the design root gets a synthetic `base_link`
-   instead of an error.
-3. **Parent = Component2, child = Component1.** Flipped joints invert the
-   tree; preflight reports the exact parent/child pair to swap.
-4. **URDF output is a tree.** A link with two parents (parallel jaws,
-   four-bars) or a cycle exports the first joint normally and stashes the
-   rest in `config/robot_data.yaml` as `closing_joints` for downstream
-   tools (Isaac Sim / MuJoCo). It does not silently break the URDF.
-5. **Only Rigid, Revolute, Slider.** Cylindrical / PinSlot / Planar / Ball /
-   Inferred abort with a named error instead of invalid URDF.
+## Frames and physics
 
-## Should
+- Use Z-up and X-forward. Meshes use their design pose in the root frame.
+- URDF visual origins undo the link pose. Do not pre-offset STL meshes.
+- URDF joint axes are expressed in the joint frame, not the parent frame.
+- Local centers of mass and inertia tensors must describe the same link
+  frame as the joint tree. Rotation matters as well as translation.
+- STL coordinates use millimeters. URDF mesh scale converts them to meters.
+- Set both limits for a bounded revolute or slider joint. An unbounded
+  revolute joint is continuous. A slider needs finite travel bounds.
+- The current assembly pose becomes URDF joint zero. Bounded limits subtract
+  the current driven position so the physical travel range stays unchanged.
 
-6. **Keep exportable geometry visible.** Hidden occurrences (light bulb
-   off) are skipped, so toggles select the export set.
-7. **Set joint limits on both sides** for Revolute/Slider, or leave both
-   unset for a `continuous` joint. Half-limited joints abort with the
-   joint name.
-8. **Design Z-up, X-forward.** Joint orientations are now exported
-   (R_parent^-1 * R_child) with axes resolved in the parent frame, but
-   starting in ROS convention avoids surprises.
-9. **Use descriptive names.** They flow into links, joints, meshes, and
-   `robot_data.yaml`; unsafe characters collapse to `_`.
-10. **Configure via `xacro_export.toml`.** ROS version, mesh refinement,
-    collision method, effort/velocity live there; see the template.
+## Output and verification
 
-## Gotchas
+- Choose a fresh package destination. Existing output is not overwritten.
+- Mesh export errors must abort publication. A successful XML write is not
+  a successful robot export.
+- ROS 2 is the only generated package format. Obsolete ROS 1 and destructive
+  copy settings are not part of the supported configuration.
+- Mock ros2_control provides articulated command and state tests, not
+  simulation physics or physical hardware control.
+- Real Fusion export remains a separate check from deterministic fixture
+  tests. Confirm an asymmetric assembly with repeated occurrences before
+  trusting its root-frame mesh convention.
 
-- Meshes export WYSIWYG in the design pose; link visual origins undo the
-  link frame pose, so do not pre-offset meshes.
-- STL scale assumes millimeter export units (Fusion default); the exporter
-  requests millimeter STL units best-effort.
-- `use_legacy_copy = true` restores the destructive duplicate-components
-  flow; back up the design first in that mode.
-- `primitive_box` collision needs Fusion bounding boxes; links without one
-  fall back to mesh collision.
+See [the verification guide](docs/testing.md) for repeatable loader and ROS
+checks, and [the related-work comparison](docs/related-work.md) for sources.

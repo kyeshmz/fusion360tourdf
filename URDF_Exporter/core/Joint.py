@@ -5,285 +5,138 @@ Created on Sun May 12 20:17:17 2019
 @author: syuntoku
 """
 
-import adsk
-from xml.etree.ElementTree import Element, SubElement
+import math
 from ..utils import utils
 from ..utils import transforms as tf
+from ..utils import config as config_mod
+
+_MOTION_FIELDS = {
+    'revolute': ('rotationAxisVector', 'rotationLimits', 'rotationValue', 1.0),
+    'prismatic': ('slideDirectionVector', 'slideLimits', 'slideValue', 0.01),
+}
 
 
-def _effort_velocity(config):
-    try:
-        return float((config or {}).get('effort', 100.0)), float((config or {}).get('velocity', 100.0))
-    except Exception:
-        return 100.0, 100.0
-
-
-class Joint:
-    def __init__(self, name, xyz, axis, parent, child, joint_type, upper_limit, lower_limit,
-                 rpy=None, effort=100, velocity=100):
-        """
-        Attributes
-        ----------
-        name: str
-            name of the joint
-        type: str
-            type of the joint(ex: rev)
-        xyz: [x, y, z]
-            coordinate of the joint
-        axis: [x, y, z]
-            coordinate of axis of the joint
-        parent: str
-            parent link
-        child: str
-            child link
-        joint_xml: str
-            generated xml describing about the joint
-        tran_xml: str
-            generated xml describing about the transmission
-        """
-        self.name = name
-        self.type = joint_type
-        self.xyz = xyz
-        self.rpy = list(rpy) if rpy is not None else [0, 0, 0]
-        self.parent = parent
-        self.child = child
-        self.joint_xml = None
-        self.tran_xml = None
-        self.axis = axis  # for 'revolute' and 'continuous'
-        self.upper_limit = upper_limit  # for 'revolute' and 'prismatic'
-        self.lower_limit = lower_limit  # for 'revolute' and 'prismatic'
-        try:
-            self.effort = float(effort)
-        except Exception:
-            self.effort = 100.0
-        try:
-            self.velocity = float(velocity)
-        except Exception:
-            self.velocity = 100.0
-        
-    def make_joint_xml(self):
-        """
-        Generate the joint_xml and hold it by self.joint_xml
-        """
-        joint = Element('joint')
-        joint.attrib = {'name':self.name, 'type':self.type}
-        
-        origin = SubElement(joint, 'origin')
-        origin.attrib = {'xyz':' '.join([str(_) for _ in self.xyz]),
-                         'rpy': tf.format_vector(self.rpy or [0, 0, 0])}
-        parent = SubElement(joint, 'parent')
-        parent.attrib = {'link':self.parent}
-        child = SubElement(joint, 'child')
-        child.attrib = {'link':self.child}
-        if self.type == 'revolute' or self.type == 'continuous' or self.type == 'prismatic':        
-            axis = SubElement(joint, 'axis')
-            axis.attrib = {'xyz':' '.join([str(_) for _ in self.axis])}
-        if self.type == 'revolute' or self.type == 'prismatic':
-            limit = SubElement(joint, 'limit')
-            limit.attrib = {'upper': tf.format_float(self.upper_limit), 'lower': tf.format_float(self.lower_limit),
-                            'effort': tf.format_float(self.effort), 'velocity': tf.format_float(self.velocity)}
-            
-        self.joint_xml = "\n".join(utils.prettify(joint).split("\n")[1:])
-
-    def make_transmission_xml(self):
-        """
-        Generate the tran_xml and hold it by self.tran_xml
-        
-        
-        Notes
-        -----------
-        mechanicalTransmission: 1
-        type: transmission interface/SimpleTransmission
-        hardwareInterface: PositionJointInterface        
-        """        
-        
-        tran = Element('transmission')
-        tran.attrib = {'name':self.name + '_tran'}
-        
-        joint_type = SubElement(tran, 'type')
-        joint_type.text = 'transmission_interface/SimpleTransmission'
-        
-        joint = SubElement(tran, 'joint')
-        joint.attrib = {'name':self.name}
-        hardwareInterface_joint = SubElement(joint, 'hardwareInterface')
-        hardwareInterface_joint.text = 'hardware_interface/EffortJointInterface'
-        
-        actuator = SubElement(tran, 'actuator')
-        actuator.attrib = {'name':self.name + '_actr'}
-        hardwareInterface_actr = SubElement(actuator, 'hardwareInterface')
-        hardwareInterface_actr.text = 'hardware_interface/EffortJointInterface'
-        mechanicalReduction = SubElement(actuator, 'mechanicalReduction')
-        mechanicalReduction.text = '1'
-        
-        self.tran_xml = "\n".join(utils.prettify(tran).split("\n")[1:])
-
-
-def make_joints_dict(root, msg, config=None):
-    """
-    joints_dict holds parent, axis and xyz informatino of the joints
-
-
-    Parameters
-    ----------
-    root: adsk.fusion.Design.cast(product)
-        Root component
-    msg: str
-        Tell the status
-    config: dict or None
-        Export config (effort/velocity). Defaults preserve legacy output.
-
-    Returns
-    ----------
-    joints_dict:
-        {name: {type, axis, upper_limit, lower_limit, parent, child, xyz, rpy}}
-    msg: str
-        Tell the status
-    """
+def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None):
+    """Extract SI poses and joint-frame axes, with limits relative to the design pose."""
 
     joints_dict = {}
-    effort, velocity = _effort_velocity(config)
+    success = msg
+    source_notes = [] if source_notes is None else source_notes
+    config = config_mod.load_config(overrides=config)
+    sources = utils.link_sources(root, config=config) if sources is None else sources
+    effort, velocity = config['effort'], config['velocity']
 
     def iter_joints():
-        try:
-            for joint in root.joints:
-                yield joint, False
-        except Exception:
-            return
-        try:
-            as_built = getattr(root, 'asBuiltJoints', None)
-            if as_built is not None:
-                for joint in as_built:
-                    yield joint, True
-        except Exception:
-            return
+        for joint in utils.collection_items(root.allJoints):
+            yield joint, False
+        for joint in utils.collection_items(root.allAsBuiltJoints):
+            yield joint, True
 
     for joint, is_as_built in iter_joints():
+        if getattr(joint, 'isSuppressed', False):
+            continue
         joint_dict = {}
-        try:
-            type_value = _joint_type_value(joint.jointMotion)
-        except Exception:
-            msg = getattr(joint, 'name', 'joint') + ' has an unreadable joint type.'
-            break
-        joint_type = _urdf_type_for(type_value)
-        if joint_type is None:
-            fusion_name = _FUSION_JOINT_NAMES.get(type_value, str(type_value))
-            msg = (getattr(joint, 'name', 'joint') +
-                   ' uses ' + fusion_name + ' joints, which URDF does not support.'
-                   ' Please use Rigid, Revolute, or Slider joints.')
-            break
-        joint_dict['type'] = joint_type
-
-        # swhich by the type of the joint
-        joint_dict['axis'] = [0, 0, 0]
-        joint_dict['upper_limit'] = 0.0
-        joint_dict['lower_limit'] = 0.0
-
-        # support  "Revolute", "Rigid" and "Slider"
-        if joint_type == 'revolute':
-            try:
-                raw_axis = list(
-                    joint.jointMotion.rotationAxisVector.asArray())  # In Fusion, exported axis is normalized.
-            except Exception:
-                msg = joint.name + ' has an unreadable rotation axis.'
-                break
-            max_enabled = joint.jointMotion.rotationLimits.isMaximumValueEnabled
-            min_enabled = joint.jointMotion.rotationLimits.isMinimumValueEnabled
-            if max_enabled and min_enabled:
-                joint_dict['upper_limit'] = round(joint.jointMotion.rotationLimits.maximumValue, 6)
-                joint_dict['lower_limit'] = round(joint.jointMotion.rotationLimits.minimumValue, 6)
-            elif max_enabled and not min_enabled:
-                msg = joint.name + 'is not set its lower limit. Please set it and try again.'
-                break
-            elif not max_enabled and min_enabled:
-                msg = joint.name + 'is not set its upper limit. Please set it and try again.'
-                break
-            else:  # if there is no angle limit
-                joint_dict['type'] = 'continuous'
-            joint_dict['_raw_axis'] = raw_axis
-
-        elif joint_type == 'prismatic':
-            try:
-                raw_axis = list(
-                    joint.jointMotion.slideDirectionVector.asArray())  # Also normalized
-            except Exception:
-                msg = joint.name + ' has an unreadable slide direction.'
-                break
-            max_enabled = joint.jointMotion.slideLimits.isMaximumValueEnabled
-            min_enabled = joint.jointMotion.slideLimits.isMinimumValueEnabled
-            if max_enabled and min_enabled:
-                joint_dict['upper_limit'] = round(joint.jointMotion.slideLimits.maximumValue / 100, 6)
-                joint_dict['lower_limit'] = round(joint.jointMotion.slideLimits.minimumValue / 100, 6)
-            elif max_enabled and not min_enabled:
-                msg = joint.name + 'is not set its lower limit. Please set it and try again.'
-                break
-            elif not max_enabled and min_enabled:
-                msg = joint.name + 'is not set its upper limit. Please set it and try again.'
-                break
-            joint_dict['_raw_axis'] = raw_axis
-        elif joint_type == 'fixed':
-            pass
-
         try:
             occ_two = joint.occurrenceTwo
             occ_one = joint.occurrenceOne
         except Exception:
             msg = joint.name + " doesn't reference two occurrences. Please set it and run again."
             break
+        context = getattr(joint, 'assemblyContext', None)
+        prefix = getattr(context, 'fullPathName', '')
+        source_name = prefix + '+' + joint.name if prefix else joint.name
+        endpoints, errors = [], []
+        for occurrence in (occ_two, occ_one):
+            try:
+                endpoints.append(utils.link_name(occurrence, sources, context))
+            except ValueError as error:
+                errors.append(str(error))
+        if errors:
+            if len(errors) == 2 and all(error.startswith('CONSTRAINT_TARGET_EXCLUDED') for error in errors):
+                source_notes.append({'name': source_name, 'reason': 'All joint endpoints are excluded'})
+                continue
+            raise ValueError(source_name + ': ' + '; '.join(errors))
+        joint_dict['parent'], joint_dict['child'] = endpoints
         try:
-            if occ_two.component.name == 'base_link':
-                joint_dict['parent'] = 'base_link'
-            else:
-                joint_dict['parent'] = utils.sanitize_name(occ_two.name)
+            type_value = _joint_type_value(joint.jointMotion)
         except Exception:
-            msg = joint.name + ' has an unreadable parent occurrence.'
+            msg = getattr(joint, 'name', 'joint') + ' has an unreadable joint type.'
             break
-        try:
-            joint_dict['child'] = utils.sanitize_name(occ_one.name)
-        except Exception:
-            msg = joint.name + ' has an unreadable child occurrence.'
+        joint_type = _urdf_type_for(type_value)
+        locked = getattr(joint, 'isLocked', False) and type_value != 0
+        if joint_type is None and locked and type_value in _FUSION_JOINT_NAMES:
+            joint_type = 'fixed'
+        if joint_type is None:
+            fusion_name = _FUSION_JOINT_NAMES.get(type_value, str(type_value))
+            msg = ('UNSUPPORTED_FUSION_JOINT_TYPE: ' + source_name + ' uses ' + fusion_name +
+                   '; generalized-joint decomposition is not implemented. Use Rigid, Revolute, or Slider joints.')
             break
+        joint_dict['type'] = joint_type
 
+        joint_dict['axis'] = [0, 0, 0]
+        joint_dict['upper_limit'] = 0.0
+        joint_dict['lower_limit'] = 0.0
 
-        #There seem to be a problem with geometryOrOriginTwo. To calcualte the correct orogin of the generated stl files following approach was used.
-        #https://forums.autodesk.com/t5/fusion-360-api-and-scripts/difference-of-geometryororiginone-and-geometryororiginonetwo/m-p/9837767
-        #Thanks to Masaki Yamamoto!
-        # Update: Occurrence.transform was retired in July 2025; use transform2.
-        # geometryOneTransform/geometryTwoTransform are used as a fallback when
-        # joint geometry is no longer available.
+        if locked:
+            original_type = _urdf_type_for(type_value) or _FUSION_JOINT_NAMES[type_value]
+            limits = getattr(joint.jointMotion, 'rotationLimits', None)
+            if joint_type == 'revolute' and limits is not None and not limits.isMaximumValueEnabled and not limits.isMinimumValueEnabled:
+                original_type = 'continuous'
+            joint_dict['original_motion'] = {'type': original_type, 'fusion_type': _FUSION_JOINT_NAMES[type_value]}
+            joint_dict['fixed_reason'] = 'Fusion joint is locked at the current pose'
+            joint_dict['type'] = 'fixed'
+        elif joint_type in _MOTION_FIELDS:
+            axis_property, limits_property, position_property, scale = _MOTION_FIELDS[joint_type]
+            try:
+                motion = joint.jointMotion
+                raw_axis = list(getattr(motion, axis_property).asArray())
+                limits = getattr(motion, limits_property)
+                position = float(getattr(motion, position_property)) * scale
+                if not math.isfinite(position):
+                    raise ValueError('Current joint position must be finite')
+                maximum, minimum = limits.isMaximumValueEnabled, limits.isMinimumValueEnabled
+                if maximum != minimum:
+                    raise ValueError('Set both lower and upper limits')
+                if maximum:
+                    joint_dict['upper_limit'] = limits.maximumValue * scale - position
+                    joint_dict['lower_limit'] = limits.minimumValue * scale - position
+                elif joint_type == 'revolute':
+                    joint_dict['type'] = 'continuous'
+                else:
+                    raise ValueError('Slider joints need finite lower and upper limits')
+            except Exception as error:
+                msg = joint.name + ' has invalid motion data: ' + str(error)
+                break
+            joint_dict['_raw_axis'] = raw_axis
 
         try:
             xyz_of_joint_cm = _resolve_joint_xyz_cm(joint, is_as_built)
+            if xyz_of_joint_cm is None and is_as_built and type_value == 0:
+                owner = sources[joint_dict['child']].owner
+                xyz_of_joint_cm = utils.occurrence_translation(owner) if owner is not None and hasattr(owner, 'component') else [0, 0, 0]
             if xyz_of_joint_cm is None:
                 raise ValueError('no origin')
-            joint_dict['xyz'] = [round(i / 100.0, 6) for i in xyz_of_joint_cm]  # converted to meter
+            joint_dict['xyz'] = [i / 100.0 for i in xyz_of_joint_cm]
 
         except Exception:
-            msg = joint.name + " doesn't have joint origin. Please set it and run again."
+            msg = 'JOINT_FRAME_UNAVAILABLE: ' + joint.name + ' has no readable current joint transform.'
             break
 
-        # Joint orientation: child occurrence pose in the parent occurrence
-        # frame (R_parent^-1 * R_child). Identity when Fusion rotations are
-        # unavailable, which preserves legacy translation-only output.
-        joint_dict['rpy'] = _joint_rpy_for(joint)
-        # Joint axis is authored in the design frame; express it in the
-        # parent link frame so the URDF stays correct when the parent is
-        # rotated (Adriaeik's axis-against-link-frame rule).
+        parent_rotation = _source_rotation(joint_dict['parent'], sources)
+        child_rotation = _source_rotation(joint_dict['child'], sources)
+        joint_dict['rpy'] = list(tf.rpy_from_mat3(tf.mat3_mul(tf.mat3_transpose(parent_rotation), child_rotation)))
         if '_raw_axis' in joint_dict:
             raw_axis = joint_dict.pop('_raw_axis')
-            joint_dict['axis'] = _axis_in_parent_frame(raw_axis, occ_two)
+            joint_dict['axis'] = tf.normalize(tf.rotate_vector_by_mat3(raw_axis, tf.mat3_transpose(child_rotation)))
         joint_dict['effort'] = effort
         joint_dict['velocity'] = velocity
-
-        name = utils.sanitize_name(joint.name)
+        name = utils.sanitize_name(source_name)
         if name in joints_dict:
-            suffix = '_asbuilt' if is_as_built else '_2'
-            candidate = name + suffix
-            counter = 2
-            while candidate in joints_dict:
-                counter += 1
-                candidate = name + '_' + str(counter)
-            name = candidate
+            raise ValueError('Duplicate joint identity: ' + name)
         joints_dict[name] = joint_dict
+    if msg == success:
+        joints_dict = _rigid_attachments(root, joints_dict, sources, source_notes)
+        joints_dict = _orient_outward(joints_dict, sources)
     return joints_dict, msg
 
 
@@ -343,31 +196,6 @@ def _urdf_type_for(type_value):
     return _FUSION_TO_URDF.get(type_value)
 
 
-def _origin_array(origin_like):
-    """Return a 3-element array from a JointGeometry/JointOrigin/Point."""
-    if origin_like is None:
-        return None
-    for attr in ('origin', 'geometry', 'point'):
-        try:
-            candidate = getattr(origin_like, attr, None)
-            if candidate is None:
-                continue
-            if callable(candidate):
-                candidate = candidate()
-            if hasattr(candidate, 'asArray'):
-                return list(candidate.asArray())
-            if hasattr(candidate, 'origin') and hasattr(candidate.origin, 'asArray'):
-                return list(candidate.origin.asArray())
-        except Exception:
-            continue
-    try:
-        if hasattr(origin_like, 'asArray'):
-            return list(origin_like.asArray())
-    except Exception:
-        pass
-    return None
-
-
 def _matrix_translation_cm(matrix):
     if matrix is None:
         return None
@@ -392,27 +220,6 @@ def _resolve_joint_xyz_cm(joint, is_as_built):
 
 
 def _resolve_standard_xyz_cm(joint):
-    # Primary path: joint origins relative to each occurrence, composed
-    # with the occurrence transform (transform2, retired transform fallback).
-    try:
-        one = getattr(joint, 'geometryOrOriginOne', None)
-        two = getattr(joint, 'geometryOrOriginTwo', None)
-        xyz_from_one = _origin_array(one)
-        xyz_from_two = _origin_array(two)
-        xyz_of_one = utils.occurrence_translation(joint.occurrenceOne)
-        matrix_two = utils.occurrence_matrix_array(joint.occurrenceTwo)
-        if xyz_from_one is not None and xyz_from_two is not None:
-            if xyz_of_one is not None and matrix_two is not None:
-                if utils.arrays_close(xyz_from_two, xyz_from_one) or \
-                        utils.arrays_close(xyz_from_two, xyz_of_one):
-                    return list(xyz_from_two)
-                return utils.transform_point(matrix_two, xyz_from_two)
-            return list(xyz_from_two)
-    except Exception:
-        pass
-
-    # Fallback 1: explicit joint-geometry transforms (survive model edits
-    # that invalidate the original joint geometry).
     for attr in ('geometryTwoTransform', 'geometryOneTransform'):
         try:
             matrix = getattr(joint, attr, None)
@@ -422,73 +229,182 @@ def _resolve_standard_xyz_cm(joint):
         except Exception:
             continue
 
-    # Fallback 2: JointOrigin wrapper around geometry.
+    return None
+
+
+def _resolve_asbuilt_xyz_cm(joint):
     try:
-        two = getattr(joint, 'geometryOrOriginTwo', None)
-        if two is not None and 'JointOrigin' in type(two).__name__:
-            data = _origin_array(getattr(two, 'geometry', None))
-            if data is not None:
-                return list(data)
-        data = _origin_array(two)
-        if data is not None:
-            return list(data)
+        translation = _matrix_translation_cm(joint.transform)
+        if translation is not None:
+            return translation
     except Exception:
         pass
     return None
 
 
-def _resolve_asbuilt_xyz_cm(joint):
-    for attr in ('geometry', 'transform'):
+def _source_rotation(name, sources):
+    if name == 'base_link' or not hasattr(sources[name].owner, 'component'):
+        return tf.IDENTITY_3X3
+    matrix = utils.occurrence_matrix_array(sources[name].owner)
+    if matrix is None:
+        raise ValueError('LINK_FRAME_UNAVAILABLE: ' + name)
+    return tf.rotation3_from_array16(matrix)
+
+
+def _rigid_members(group, sources):
+    members, excluded = set(), []
+    context = getattr(group, 'assemblyContext', None)
+    for occurrence in utils.collection_items(group.occurrences):
         try:
-            candidate = getattr(joint, attr, None)
-            if candidate is None:
-                continue
-            if attr == 'transform':
-                translation = _matrix_translation_cm(candidate)
-                if translation is not None:
-                    return list(translation)
-                continue
-            data = _origin_array(candidate)
-            if data is not None:
-                return list(data)
-        except Exception:
+            selected, hidden = sources.rigid_members(occurrence, context)
+        except ValueError as error:
+            raise ValueError(group.name + ': ' + str(error)) from error
+        members.update(selected)
+        excluded.extend(hidden)
+    if members and excluded:
+        raise ValueError('CONSTRAINT_TARGET_EXCLUDED: rigid group %s crosses excluded sources %s' %
+                         (group.name, ', '.join(excluded)))
+    return members
+
+
+def _rigid_attachments(root, joints, sources, source_notes):
+    groups = [(entry['name'], members, entry)
+              for entry, members in sources.grounding_attachments(source_notes)]
+    for group in utils.collection_items(getattr(root, 'allRigidGroups', ())):
+        if getattr(group, 'isSuppressed', False):
             continue
-    return None
+        members = _rigid_members(group, sources)
+        context = getattr(group, 'assemblyContext', None)
+        prefix = getattr(context, 'fullPathName', '')
+        source_name = prefix + '+' + group.name if prefix else group.name
+        if members:
+            groups.append((source_name, members,
+                           {'name': source_name, 'source': 'Fusion rigid group', 'members': sorted(members)}))
+        else:
+            source_notes.append({'name': source_name, 'reason': 'All rigid group members are excluded'})
+    if not groups:
+        return joints
+    leaders = {name: name for name in sources}
+
+    def leader(name):
+        while leaders[name] != name:
+            name = leaders[name]
+        return name
+
+    def union(members):
+        roots = sorted({leader(name) for name in members})
+        for name in roots[1:]:
+            leaders[name] = roots[0]
+
+    for _, members, _ in groups:
+        union(members)
+    for joint in joints.values():
+        if joint['type'] == 'fixed':
+            union((joint['parent'], joint['child']))
+    clusters = {}
+    for name in sources:
+        clusters.setdefault(leader(name), set()).add(name)
+    grouped = {leader(next(iter(members))) for _, members, _ in groups}
+    provenance = {key: [] for key in grouped}
+    for _, members, entry in sorted(groups, key=lambda group: group[0]):
+        provenance[leader(next(iter(members)))].append(entry)
+    adjacency = {key: [] for key in clusters}
+    for name, joint in sorted(joints.items()):
+        parent, child = leader(joint['parent']), leader(joint['child'])
+        if joint['type'] == 'fixed':
+            if parent in grouped:
+                provenance[parent].append(dict(joint, name=name, source='Fusion fixed joint'))
+            continue
+        if parent == child and parent in grouped:
+            kind = ('GROUNDING_INTERNAL_MOTION' if any(entry['source'] == 'Fusion grounding'
+                    for entry in provenance[parent]) else 'RIGID_GROUP_INTERNAL_MOTION')
+            raise ValueError('%s: %s conflicts with %s' %
+                             (kind, name, ', '.join(entry['name'] for entry in provenance[parent])))
+        adjacency[parent].append((name, child, joint['child']))
+        adjacency[child].append((name, parent, joint['parent']))
+    base = leader('base_link')
+    attachments, queue, traversed = {base: 'base_link'}, [base], set()
+    predecessors, incoming_edges = {base: None}, {}
+    for current in queue:
+        for name, other, endpoint in sorted(adjacency[current]):
+            if name in traversed:
+                continue
+            traversed.add(name)
+            if other in attachments:
+                ancestors, node = set(), current
+                while node is not None:
+                    ancestors.add(node)
+                    node = predecessors[node]
+                cycle_edges, node = [name], other
+                while node not in ancestors:
+                    cycle_edges.append(incoming_edges[node])
+                    node = predecessors[node]
+                common, node = node, current
+                while node != common:
+                    cycle_edges.append(incoming_edges[node])
+                    node = predecessors[node]
+                cycle_members = {key: set() for key in grouped}
+                for edge in cycle_edges:
+                    for endpoint in (joints[edge]['parent'], joints[edge]['child']):
+                        key = leader(endpoint)
+                        if key in grouped:
+                            cycle_members[key].add(endpoint)
+                if any(len(members) > 1 for members in cycle_members.values()):
+                    raise ValueError('RIGID_GROUP_KINEMATIC_LOOP: %s; rigid groups %s' %
+                                     (', '.join(sorted(cycle_edges)), ', '.join(sorted(name for name, _, _ in groups))))
+                continue
+            attachments[other] = endpoint
+            predecessors[other], incoming_edges[other] = current, name
+            queue.append(other)
+    result = {name: joint for name, joint in joints.items()
+              if joint['type'] != 'fixed' or leader(joint['parent']) not in grouped}
+    for key in sorted(grouped):
+        if key not in attachments:
+            raise ValueError('DISCONNECTED_RIGID_GROUP: ' + ', '.join(sorted(clusters[key])))
+        parent = attachments[key]
+        for child in sorted(clusters[key] - {parent}):
+            name = 'rigid_attachment_' + child
+            if name in result or name in joints:
+                raise ValueError('Duplicate joint identity: ' + name)
+            owner = sources[child].owner
+            xyz = utils.occurrence_translation(owner) if hasattr(owner, 'component') else [0, 0, 0]
+            if xyz is None:
+                raise ValueError('LINK_FRAME_UNAVAILABLE: ' + child)
+            result[name] = {'parent': parent, 'child': child, 'type': 'fixed',
+                'xyz': [value / 100 for value in xyz], 'axis': [0, 0, 0],
+                'rpy': list(tf.rpy_from_mat3(tf.mat3_mul(tf.mat3_transpose(_source_rotation(parent, sources)),
+                                                       _source_rotation(child, sources)))),
+                'rigid_constraints': provenance[key]}
+    return result
 
 
-def _joint_rpy_for(joint):
-    """Child occurrence orientation in the parent occurrence frame.
-
-    Returns [roll, pitch, yaw] in radians, or [0, 0, 0] when Fusion
-    rotations are unavailable (legacy translation-only behavior).
-    """
-    try:
-        parent_matrix = utils.occurrence_matrix_array(joint.occurrenceTwo)
-        child_matrix = utils.occurrence_matrix_array(joint.occurrenceOne)
-        if parent_matrix is None or child_matrix is None:
-            return [0, 0, 0]
-        pose = tf.relative_pose(parent_matrix, child_matrix)
-        if pose is None:
-            return [0, 0, 0]
-        _, rpy = pose
-        return [round(float(v), 6) for v in rpy]
-    except Exception:
-        return [0, 0, 0]
-
-
-def _axis_in_parent_frame(axis_global, parent_occ):
-    """Express a design-frame axis in the parent occurrence frame."""
-    try:
-        parent_matrix = utils.occurrence_matrix_array(parent_occ)
-        axis = tf.normalize([float(v) for v in axis_global])
-        if parent_matrix is None:
-            return [round(v, 6) for v in axis]
-        parent_rot = tf.rotation3_from_array16(parent_matrix)
-        axis_parent = tf.rotate_vector_by_mat3(axis, tf.mat3_transpose(parent_rot))
-        axis_parent = tf.normalize(axis_parent)
-        return [round(v, 6) for v in axis_parent]
-    except Exception:
-        try:
-            return [round(float(v), 6) for v in axis_global]
-        except Exception:
-            return [0, 0, 0]
+def _orient_outward(joints, sources):
+    adjacency = {name: [] for name in sources}
+    for name, joint in joints.items():
+        adjacency[joint['parent']].append(name)
+        adjacency[joint['child']].append(name)
+    result, visited, queue = {}, {'base_link'}, ['base_link']
+    for parent in queue:
+        for name in sorted(adjacency[parent]):
+            if name in result:
+                continue
+            record = dict(joints[name])
+            old_parent, old_child = record['parent'], record['child']
+            child = old_child if old_parent == parent else old_parent
+            if child in visited:
+                result[name] = record
+                continue
+            if old_parent != parent:
+                world_axis = tf.rotate_vector_by_mat3(record['axis'], _source_rotation(old_child, sources))
+                record['axis'] = tf.normalize(tf.rotate_vector_by_mat3(
+                    [-value for value in world_axis], tf.mat3_transpose(_source_rotation(child, sources))))
+                record['parent'], record['child'] = parent, child
+                record['rpy'] = list(tf.rpy_from_mat3(tf.mat3_mul(
+                    tf.mat3_transpose(_source_rotation(parent, sources)), _source_rotation(child, sources))))
+                record['endpoint_reversed'] = True
+            result[name] = record
+            visited.add(child)
+            queue.append(child)
+    if len(visited) != len(sources):
+        raise ValueError('DISCONNECTED_LINKS: ' + ', '.join(sorted(sources.keys() - visited)))
+    return result

@@ -4,6 +4,8 @@ import sys
 import tempfile
 import types
 import unittest
+from pathlib import Path
+from tests.test_package import write_meshes
 
 adsk = types.ModuleType('adsk')
 adsk_core = types.ModuleType('adsk.core')
@@ -54,12 +56,8 @@ class LinterTest(unittest.TestCase):
                     'bbox_center_m': None, 'bbox_size_m': None},
         }
         with tempfile.TemporaryDirectory() as tmp:
-            save_dir = os.path.join(tmp, 'bot_description')
-            os.makedirs(os.path.join(save_dir, 'meshes'))
-            for name in ('base_link', 'arm'):
-                open(os.path.join(save_dir, 'meshes', name + '.stl'), 'w').write('solid\nendsolid\n')
-            Write.write_urdf(joints, {}, inertial, 'bot_description', 'bot', save_dir,
-                             config={'collision_method': 'visual'})
+            save_dir = Path(tmp) / 'bot_description'
+            Write.write_ros2_package(save_dir, 'bot', joints, inertial, write_meshes=write_meshes)
             errors, _ = validate_urdf.lint_file(
                 os.path.join(save_dir, 'urdf', 'bot.xacro'),
                 os.path.join(save_dir, 'meshes'))

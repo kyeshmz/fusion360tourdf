@@ -4,6 +4,10 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
+import importlib
+from pathlib import Path
+from tests.test_package import mesh_bytes, write_meshes
 
 # Stub the Fusion `adsk` modules before importing exporter code.
 adsk = types.ModuleType('adsk')
@@ -62,6 +66,7 @@ class FakeOccurrence:
         self.name = name
         self.component = types.SimpleNamespace(name=component_name)
         self.transform2 = FakeMatrix(identity_at(xyz))
+        self.bRepBodies = [object()]
 
 
 class FakeJointMotion:
@@ -76,6 +81,8 @@ class FakeJoint:
         self.occurrenceTwo = occ_two
         self.geometryOrOriginOne = types.SimpleNamespace(origin=FakePoint(one_xyz))
         self.geometryOrOriginTwo = types.SimpleNamespace(origin=FakePoint(two_xyz))
+        self.geometryTwoTransform = FakeMatrix(identity_at(two_xyz))
+        self.transform = self.geometryTwoTransform
         self.jointMotion = FakeJointMotion(0)
 
 
@@ -83,6 +90,17 @@ class FakeRoot:
     def __init__(self, joints, as_built=()):
         self.joints = joints
         self.asBuiltJoints = list(as_built)
+        self.allJoints = joints
+        self.allAsBuiltJoints = list(as_built)
+        occurrences = {}
+        self.bRepBodies = []
+        for joint in list(joints) + list(as_built):
+            for occ in (joint.occurrenceOne, joint.occurrenceTwo):
+                if occ is None:
+                    self.bRepBodies = [object()]
+                else:
+                    occurrences.setdefault(getattr(occ, 'fullPathName', None) or occ.name, occ)
+        self.allOccurrences = list(occurrences.values())
 
 
 class ExporterLogicTest(unittest.TestCase):
@@ -102,13 +120,11 @@ class ExporterLogicTest(unittest.TestCase):
         self.assertEqual(utils.occurrence_translation(occ), [1, 2, 3])
         self.assertEqual(utils.occurrence_matrix_array(occ)[:4], [1, 0, 0, 1])
 
-    def test_make_joints_dict_uses_transform2(self):
+    def test_make_joints_dict_uses_current_root_context_transform(self):
         occ_one = FakeOccurrence('child:1', 'child', [0, 0, 0])
         occ_two = FakeOccurrence('parent:1', 'parent', [100, 0, 0])
-        # Joint origins differ so the occurrence transform must compose them:
-        # 100cm (occurrence) + 5cm (joint in occurrence frame) = 105cm.
         joint = FakeJoint('Rev1', occ_one, occ_two, [10, 0, 0], [5, 0, 0])
-        # Force legacy transform to be wrong to prove transform2 is used.
+        joint.geometryTwoTransform = FakeMatrix(identity_at([105, 0, 0]))
         occ_two.transform = FakeMatrix(identity_at([0, 0, 0]))
         joints_dict, msg = Joint.make_joints_dict(FakeRoot([joint]), 'ok')
         self.assertEqual(msg, 'ok')
@@ -124,10 +140,40 @@ class ExporterLogicTest(unittest.TestCase):
         _, msg = Joint.make_joints_dict(FakeRoot([joint]), 'ok')
         self.assertIn('Ball', msg)
 
+    def test_nested_regular_and_as_built_joints_use_root_context_collections(self):
+        base = FakeOccurrence('base:1', 'base_link', [0, 0, 0])
+        arm = FakeOccurrence('module:1+arm:1', 'arm', [0, 0, 10])
+        tool = FakeOccurrence('module:1+tool:1', 'tool', [0, 0, 20])
+        regular = FakeJoint('hinge', arm, base, [0, 0, 10], [0, 0, 10])
+        built = FakeJoint('mount', tool, arm, [0, 0, 20], [0, 0, 20])
+        built.geometry = types.SimpleNamespace(origin=FakePoint([0, 0, 20]))
+        for joint in (regular, built):
+            joint.assemblyContext = types.SimpleNamespace(fullPathName='module:1')
+        root = FakeRoot([])
+        root.allJoints, root.allAsBuiltJoints = [regular], [built]
+        root.allOccurrences = [base, arm, tool]
+        joints, message = Joint.make_joints_dict(root, 'ok')
+        self.assertEqual(message, 'ok')
+        self.assertEqual(set(joints), {'module_1_hinge', 'module_1_mount'})
+        self.assertEqual(joints['module_1_hinge']['child'], 'module_1_arm_1')
+        self.assertEqual(joints['module_1_mount']['xyz'], [0, 0, .2])
+
+    def test_repeated_subassembly_joints_keep_distinct_identities(self):
+        base = FakeOccurrence('base:1', 'base_link', [0, 0, 0])
+        proxies = []
+        for side in ('left:1', 'right:1'):
+            child = FakeOccurrence(side + '+wheel:1', 'wheel', [0, 0, 0])
+            joint = FakeJoint('pivot', child, base, [0, 0, 0], [0, 0, 0])
+            joint.assemblyContext = types.SimpleNamespace(fullPathName=side)
+            proxies.append(joint)
+        joints, message = Joint.make_joints_dict(FakeRoot(proxies), 'ok')
+        self.assertEqual(message, 'ok')
+        self.assertEqual(set(joints), {'left_1_pivot', 'right_1_pivot'})
+        self.assertEqual(joints['right_1_pivot']['child'], 'right_1_wheel_1')
+
     def test_origin2center_of_mass(self):
         out = utils.origin2center_of_mass([1.0, 1.0, 1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1.0)
-        # Ixx about CoM should drop by y^2+z^2 = 0 in this setup for y/z terms.
-        self.assertEqual(len(out), 6)
+        self.assertEqual(out, [1, 0, 0, 0, 0, 0])
 
     def test_write_urdf_roundtrip(self):
         joints_dict = {
@@ -145,16 +191,133 @@ class ExporterLogicTest(unittest.TestCase):
                       'inertia': [0.2] * 6},
         }
         with tempfile.TemporaryDirectory() as tmp:
-            save_dir = os.path.join(tmp, 'bot_description')
-            os.makedirs(save_dir)
-            Write.write_urdf(joints_dict, {}, inertial_dict,
-                             'bot_description', 'bot', save_dir)
+            save_dir = Path(tmp) / 'bot_description'
+            Write.write_ros2_package(save_dir, 'bot', joints_dict, inertial_dict,
+                                     write_meshes=write_meshes)
             xacro = os.path.join(save_dir, 'urdf', 'bot.xacro')
             self.assertTrue(os.path.exists(xacro))
             with open(xacro) as fh:
                 text = fh.read()
             self.assertIn('joint name="Rev1"', text)
             self.assertIn('link name="link1"', text)
+
+
+class FakeCollection(list):
+    @property
+    def count(self):
+        return len(self)
+
+    def item(self, index):
+        return self[index]
+
+
+class MeshExtractionTest(unittest.TestCase):
+    def occurrence(self, name, component='wheel'):
+        occ = FakeOccurrence(name, component, [0, 0, 0])
+        occ.bRepBodies = FakeCollection([object()])
+        occ.childOccurrences = FakeCollection()
+        return occ
+
+    def design(self, occurrences, bodies=(), fail=False):
+        root = types.SimpleNamespace(allOccurrences=FakeCollection(occurrences),
+                                     bRepBodies=FakeCollection(bodies))
+        exports = []
+
+        def options(geometry, filename):
+            return types.SimpleNamespace(geometry=geometry, filename=filename, unitType=None)
+
+        def execute(opt):
+            exports.append(opt)
+            if fail:
+                return False
+            Path(opt.filename).write_bytes(mesh_bytes())
+            return True
+
+        adsk.fusion.DistanceUnits = types.SimpleNamespace(MillimeterDistanceUnits=1)
+        design = types.SimpleNamespace(rootComponent=root, exportManager=types.SimpleNamespace(
+            createSTLExportOptions=options, execute=execute))
+        return design, exports
+
+    def test_repeated_components_use_occurrence_names_and_exact_targets(self):
+        occurrences = [self.occurrence('wheel:1'), self.occurrence('wheel:2')]
+        design, exports = self.design(occurrences)
+        with tempfile.TemporaryDirectory() as tmp:
+            targets = {name: Path(tmp) / (name + '.stl') for name in ('base_link', 'wheel_2')}
+            utils.export_stl(design, targets, config={'root_occurrence': 'wheel:1'})
+            self.assertEqual([o.geometry for o in exports], [o.bRepBodies[0] for o in occurrences])
+            self.assertEqual([o.unitType for o in exports], [1, 1])
+            self.assertEqual(targets['wheel_2'].read_bytes()[84:], mesh_bytes()[84:])
+
+    def test_duplicate_sanitized_identities_are_rejected(self):
+        for occurrences in ([self.occurrence('wheel:1'), self.occurrence('wheel_1')],
+                            [self.occurrence('a', 'base_link'), self.occurrence('b', 'base_link')]):
+            design, _ = self.design(occurrences)
+            with self.assertRaises(ValueError):
+                utils.link_sources(design.rootComponent)
+
+    def test_nested_full_paths_are_shared_by_extraction_and_export(self):
+        one, two = self.occurrence('wheel:1'), self.occurrence('wheel:1')
+        one.fullPathName, two.fullPathName = 'left:1+wheel:1', 'right:1+wheel:1'
+        design, _ = self.design([one, two])
+        sources = utils.link_sources(design.rootComponent, config={'root_occurrence': 'right:1+wheel:1'})
+        self.assertEqual(list(sources), ['left_1_wheel_1', 'base_link'])
+        self.assertEqual(utils.link_name(one, sources), 'left_1_wheel_1')
+
+    def test_synthetic_root_exports_only_own_bodies(self):
+        root_bodies = [object(), object()]
+        wheel = self.occurrence('wheel:1')
+        design, exports = self.design([wheel], bodies=root_bodies)
+        with tempfile.TemporaryDirectory() as tmp:
+            targets = {name: Path(tmp) / (name + '.stl') for name in ('wheel_1', 'base_link')}
+            utils.export_stl(design, targets)
+            self.assertEqual([o.geometry for o in exports], list(wheel.bRepBodies) + root_bodies)
+            self.assertNotIn(design.rootComponent, [o.geometry for o in exports])
+            data = targets['base_link'].read_bytes()
+            self.assertEqual(len(data), 184)
+            self.assertEqual(int.from_bytes(data[80:84], 'little'), 2)
+
+    def test_export_failure_propagates_for_mixed_geometry(self):
+        wheel = self.occurrence('wheel:1')
+        design, _ = self.design([wheel], fail=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(RuntimeError, 'base_link'):
+                utils.export_stl(design, {'base_link': Path(tmp) / 'base_link.stl'})
+            wheel.childOccurrences = FakeCollection([object()])
+            with self.assertRaisesRegex(RuntimeError, 'base_link'):
+                utils.export_stl(design, {'base_link': Path(tmp) / 'base_link.stl'})
+
+    def test_synthetic_root_inertia_does_not_include_assembly_children(self):
+        def body_at(x):
+            prop = types.SimpleNamespace(mass=1, centerOfMass=FakePoint([x, 0, 0]),
+                getXYZMomentsOfInertia=lambda: (True, 10000, 20000, 30000, 0, 0, 0))
+            return types.SimpleNamespace(getPhysicalProperties=lambda _: prop)
+
+        design, _ = self.design([], [body_at(-100), body_at(100)])
+        design.rootComponent.getPhysicalProperties = lambda _: self.fail('whole assembly mass was requested')
+        inertial, status = Link.make_inertial_dict(utils.link_sources(design.rootComponent), 'ok')
+        self.assertEqual(status, 'ok')
+        self.assertEqual(inertial['base_link']['mass'], 2)
+        self.assertEqual(inertial['base_link']['center_of_mass'], [0, 0, 0])
+        self.assertEqual(inertial['base_link']['inertia'], [2, 4, 6, 0, 0, 0])
+
+    def test_fusion_ui_reports_mesh_failure_without_publishing(self):
+        entry = importlib.import_module('URDF_Exporter.URDF_Exporter')
+        design, _ = self.design([], bodies=[object()], fail=True)
+        design.rootComponent.name = 'bot'
+        messages = []
+        ui = types.SimpleNamespace(messageBox=lambda text, title: messages.append(text))
+        app = types.SimpleNamespace(userInterface=ui, activeProduct=design)
+        inertia = {'base_link': {'mass': 1, 'center_of_mass': [0, 0, 0], 'inertia': [1, 1, 1, 0, 0, 0]}}
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(entry.adsk.core, 'Application', types.SimpleNamespace(get=lambda: app), create=True), \
+             mock.patch.object(entry.adsk.fusion, 'Design', types.SimpleNamespace(cast=lambda product: product), create=True), \
+             mock.patch.object(utils, 'file_dialog', return_value=tmp), \
+             mock.patch.object(Joint, 'make_joints_dict', return_value=({}, 'ok')), \
+             mock.patch.object(Link, 'make_inertial_dict', return_value=(inertia, 'ok')):
+            entry.run(None)
+            self.assertTrue(messages[-1].startswith('Export failed:'))
+            self.assertIn('Fusion mesh export failed for base_link', messages[-1])
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
 
 if __name__ == '__main__':

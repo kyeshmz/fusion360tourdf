@@ -2,8 +2,8 @@
 """Offline URDF/xacro linter (stdlib only, no ROS/Fusion needed).
 
 De-facto validation for URDF is ``check_urdf`` from urdfdom, which needs a
-ROS install or apt package. This script covers the structural checks that
-catch 90% of broken exporter output without any dependency:
+ROS install or apt package. This script checks XML structure, numeric values,
+link topology, and mesh references without third-party dependencies:
 
 - well-formed XML, ``<robot name=...>`` root
 - unique link names; inertial mass/inertia sane; visual+collision present
@@ -21,6 +21,7 @@ warnings too.
 """
 
 import argparse
+import math
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -30,12 +31,17 @@ LIMITED_TYPES = {'revolute', 'prismatic'}
 AXIS_TYPES = {'revolute', 'continuous', 'prismatic'}
 
 
-def _parse_vec(text, count=3):
+def _parse_number(text):
     try:
-        values = [float(v) for v in str(text or '').split()]
-    except Exception:
+        value = float(text)
+    except (TypeError, ValueError):
         return None
-    if len(values) != count:
+    return value if math.isfinite(value) else None
+
+
+def _parse_vec(text, count=3):
+    values = [_parse_number(v) for v in str(text or '').split()]
+    if len(values) != count or None in values:
         return None
     return values
 
@@ -55,6 +61,13 @@ def lint_file(path, meshes_dir=None):
         return errors, warnings
     if not root.get('name'):
         errors.append('<robot> is missing the name attribute.')
+    for element in root:
+        if element.tag in ('visual', 'collision', 'inertial'):
+            errors.append('<%s> must belong to a <link>, not <robot>.' % element.tag)
+    for origin in root.iter('origin'):
+        for attribute in ('xyz', 'rpy'):
+            if _parse_vec(origin.get(attribute, '0 0 0')) is None:
+                errors.append('Origin %s malformed or nonfinite.' % attribute)
 
     links = {}
     for link in root.findall('link'):
@@ -71,23 +84,21 @@ def lint_file(path, meshes_dir=None):
             warnings.append('Link %s has no <inertial>.' % name)
         else:
             mass = inertial.find('mass')
-            try:
-                mass_value = float(mass.get('value')) if mass is not None else None
-            except Exception:
-                mass_value = None
+            mass_value = _parse_number(mass.get('value')) if mass is not None else None
             if mass_value is None:
-                errors.append('Link %s <mass> value is not a number.' % name)
+                errors.append('Link %s <mass> value is not a finite number.' % name)
             elif mass_value <= 0:
                 warnings.append('Link %s mass is not positive: %s.' % (name, mass_value))
             inertia = inertial.find('inertia')
             if inertia is None:
                 warnings.append('Link %s has no <inertia>.' % name)
             else:
-                for key in ('ixx', 'iyy', 'izz'):
-                    try:
-                        value = float(inertia.get(key))
-                    except Exception:
-                        errors.append('Link %s inertia %s is not a number.' % (name, key))
+                for key in ('ixx', 'iyy', 'izz', 'ixy', 'ixz', 'iyz'):
+                    value = _parse_number(inertia.get(key))
+                    if value is None:
+                        errors.append('Link %s inertia %s is not a finite number.' % (name, key))
+                        continue
+                    if key in ('ixy', 'ixz', 'iyz'):
                         continue
                     if value < 0:
                         errors.append('Link %s inertia %s is negative.' % (name, key))
@@ -98,12 +109,6 @@ def lint_file(path, meshes_dir=None):
             if elem is None:
                 warnings.append('Link %s has no <%s>.' % (name, section))
                 continue
-            origin = elem.find('origin')
-            if origin is not None:
-                if _parse_vec(origin.get('xyz')) is None:
-                    errors.append('Link %s <%s> origin xyz malformed.' % (name, section))
-                if _parse_vec(origin.get('rpy')) is None:
-                    errors.append('Link %s <%s> origin rpy malformed.' % (name, section))
     if not links:
         errors.append('No <link> elements found.')
         return errors, warnings
@@ -141,12 +146,6 @@ def lint_file(path, meshes_dir=None):
                           % (child_link, child_to_parent[child_link], parent_link))
         else:
             child_to_parent[child_link] = parent_link
-        origin = joint.find('origin')
-        if origin is not None:
-            if _parse_vec(origin.get('xyz')) is None:
-                errors.append('Joint %s origin xyz malformed.' % name)
-            if _parse_vec(origin.get('rpy')) is None:
-                errors.append('Joint %s origin rpy malformed.' % name)
         if jtype in AXIS_TYPES:
             axis = joint.find('axis')
             if axis is None:
@@ -162,20 +161,18 @@ def lint_file(path, meshes_dir=None):
             if limit is None:
                 errors.append('Joint %s (%s) is missing <limit>.' % (name, jtype))
             else:
-                try:
-                    lower = float(limit.get('lower'))
-                    upper = float(limit.get('upper'))
-                except Exception:
-                    errors.append('Joint %s limits are not numbers.' % name)
+                lower = _parse_number(limit.get('lower'))
+                upper = _parse_number(limit.get('upper'))
+                if lower is None or upper is None:
+                    errors.append('Joint %s limits are not finite numbers.' % name)
                 else:
                     if upper < lower:
                         errors.append('Joint %s limits inverted (lower %s > upper %s).'
                                       % (name, lower, upper))
                 for key in ('effort', 'velocity'):
-                    try:
-                        float(limit.get(key))
-                    except Exception:
-                        warnings.append('Joint %s limit %s is missing/not a number.' % (name, key))
+                    value = _parse_number(limit.get(key))
+                    if value is None or value <= 0:
+                        errors.append('Joint %s limit %s must be finite and positive.' % (name, key))
 
     # Tree check: roots are links that are never a child.
     children = set(child_to_parent)
@@ -183,8 +180,7 @@ def lint_file(path, meshes_dir=None):
     if len(roots) == 0:
         errors.append('Kinematic graph has no root (cycle?).')
     elif len(roots) > 1:
-        warnings.append('Multiple roots %s; expected one (usually base_link).' % sorted(roots))
-    # Cycle check via DFS from each root over parent->child edges.
+        errors.append('Multiple roots %s; expected one (usually base_link).' % sorted(roots))
     descendants = {}
     for joint in root.findall('joint'):
         parent = joint.find('parent')
@@ -203,7 +199,7 @@ def lint_file(path, meshes_dir=None):
         for nxt in descendants.get(node, []):
             visit(nxt, stack + [node])
 
-    for start in roots:
+    for start in links:
         visit(start, [])
 
     # Mesh existence (only when the caller points at the meshes directory).

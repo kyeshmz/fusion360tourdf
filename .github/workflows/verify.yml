@@ -1,0 +1,58 @@
+name: Verify exports
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+      - run: python tools/verify_fusion_coverage.py --output artifacts/fusion-coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fusion-offline-coverage
+          path: artifacts
+
+  cross-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends liburdfdom-tools blender
+          python -m pip install -r requirements-test.txt
+      - run: bash tools/verify_cross_tools.sh artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-tools
+          path: artifacts
+
+  ros:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/verify_docker.sh '${{ matrix.distro }}' artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ros-${{ matrix.distro }}
+          path: artifacts

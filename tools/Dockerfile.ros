@@ -1,0 +1,17 @@
+ARG ROS_DISTRO=jazzy
+FROM ros:${ROS_DISTRO}-ros-base
+ARG ROS_DISTRO
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake python3-colcon-common-extensions liburdfdom-tools \
+    ros-${ROS_DISTRO}-xacro ros-${ROS_DISTRO}-robot-state-publisher \
+    ros-${ROS_DISTRO}-joint-state-publisher ros-${ROS_DISTRO}-joint-state-publisher-gui \
+    ros-${ROS_DISTRO}-rviz2 ros-${ROS_DISTRO}-ros2-control \
+    ros-${ROS_DISTRO}-ros2-controllers ros-${ROS_DISTRO}-tf2-ros \
+    ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    && rm -rf /var/lib/apt/lists/*
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+WORKDIR /repo
+COPY . /repo
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["bash", "tools/verify_ros.sh", "/output"]

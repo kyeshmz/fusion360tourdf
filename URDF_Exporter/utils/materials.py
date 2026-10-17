@@ -1,117 +1,113 @@
-"""Fusion appearance/material helpers (best-effort, never raise).
+"""Extract one RGBA per link without importing adsk.
 
-Upstream fusion2urdf hardcodes every link to a global ``silver`` material.
-newtonjeri/fusion2urdf-master added color detection; Adriaeik preserves
-material/color per link. This module extracts RGBA defensively: the Fusion
-API shape varies across versions, so every hop is guarded.
+Native Color uses byte RGB and opacity. Untyped compatibility colors use
+normalized opacity/alpha and either normalized RGB or byte RGB as a group.
+A usable primary color takes precedence. Without it, unsupported legacy
+texture/multiple-value properties or invalid colors return None for writer
+silver. Texture patterns and distinct face/body materials are not exported.
 """
 
+import inspect
+import math
 
-def _float01(value):
+
+_COLOR_PROPERTY_IDS = ('opaque_albedo', 'metal_f0', 'transparent_color', 'generic_diffuse')
+_UNREADABLE = object()
+
+
+def _read(source, attribute, unreadable=None):
     try:
-        f = float(value)
+        value = getattr(source, attribute)
+        return value() if callable(value) else value
+    except AttributeError:
+        return None if inspect.getattr_static(source, attribute, None) is None else unreadable
     except Exception:
-        return None
-    if f < 0.0 or f > 255.0:
-        # Could already be 0..1 or garbage; accept 0..1, clamp the rest.
-        if 0.0 <= f <= 1.0:
-            return f
-        return max(0.0, min(1.0, f))
-    # Heuristic: values > 1 are 0..255 channel values.
-    if f > 1.0:
-        return f / 255.0
-    return f
+        return unreadable
 
 
 def appearance_to_rgba(appearance):
-    """Convert a Fusion appearance-ish object to (r, g, b, a) or None."""
+    """Read Appearance.color or a supported appearanceProperties ColorProperty."""
     if appearance is None:
         return None
-    # Common shape: appearance.diffuse.{red,green,blue,opacity}
-    for attr in ('diffuse', 'color', 'baseColor'):
-        try:
-            candidate = getattr(appearance, attr, None)
-            if candidate is None:
+    rgba = _rgba_from_color_like(_read(appearance, 'color'), native=True)
+    if rgba is not None:
+        return rgba
+    properties = _read(appearance, 'appearanceProperties')
+    if properties is not None:
+        for identifier in _COLOR_PROPERTY_IDS:
+            try:
+                prop = properties.itemById(identifier)
+            except Exception:
                 continue
-            if callable(candidate):
-                candidate = candidate()
-            rgba = _rgba_from_color_like(candidate)
-            if rgba is not None:
-                return rgba
-        except Exception:
-            continue
+            if prop is None:
+                continue
+            if (_read(prop, 'objectType') != 'adsk::core::ColorProperty'
+                    or _read(prop, 'hasConnectedTexture') is not False
+                    or _read(prop, 'hasMultipleValues') is not False):
+                return None
+            return _rgba_from_color_like(_read(prop, 'value'), native=True)
+        return None
+    if _read(appearance, 'objectType') == 'adsk::core::Appearance':
+        return None
+    for attr in ('diffuse', 'color', 'baseColor'):
+        rgba = _rgba_from_color_like(_read(appearance, attr))
+        if rgba is not None:
+            return rgba
     return _rgba_from_color_like(appearance)
 
 
-def _rgba_from_color_like(color):
+def _rgba_from_color_like(color, native=False):
     if color is None:
         return None
-    channels = []
-    for attr in ('red', 'green', 'blue'):
-        try:
-            value = getattr(color, attr, None)
-            if value is None:
-                continue
-            if callable(value):
-                value = value()
-            channels.append(_float01(value))
-        except Exception:
+    kind = _read(color, 'objectType')
+    if native or kind is not None:
+        if kind != 'adsk::core::Color':
             return None
-    if len(channels) != 3:
+        native = True
+    try:
+        channels = []
+        for attr in ('red', 'green', 'blue'):
+            value = getattr(color, attr)
+            channels.append(float(value() if callable(value) else value))
+        opacity = getattr(color, 'opacity', None)
+        if opacity is None and not native:
+            opacity = getattr(color, 'alpha', 1.0)
+        opacity = float(opacity() if callable(opacity) else opacity)
+    except Exception:
         return None
-    if any(c is None for c in channels):
+    rgb_scale = 255.0 if native or max(channels) > 1.0 else 1.0
+    alpha_scale = 255.0 if native else 1.0
+    if (any(not math.isfinite(c) or not 0.0 <= c <= rgb_scale for c in channels)
+            or not math.isfinite(opacity) or not 0.0 <= opacity <= alpha_scale):
         return None
-    opacity = 1.0
-    for attr in ('opacity', 'alpha'):
-        try:
-            value = getattr(color, attr, None)
-            if value is None:
-                continue
-            if callable(value):
-                value = value()
-            f = float(value)
-            if 0.0 <= f <= 1.0:
-                opacity = f
-            elif 0.0 <= f <= 100.0:
-                opacity = f / 100.0
-            break
-        except Exception:
-            continue
-    r, g, b = channels
-    return (round(r, 3), round(g, 3), round(b, 3), round(opacity, 3))
+    return tuple(c / rgb_scale for c in channels) + (opacity / alpha_scale,)
 
 
-def occurrence_rgba(occurrence):
-    """Best-effort RGBA for an occurrence, or None to use the fallback."""
+def occurrence_rgba(occurrence, bodies=()):
+    """Select owner override, canonical body appearance, then material fallback.
+
+    A present unsupported or unreadable appearance stops the search with None.
+    Bodies must be the selected direct bodies, in their canonical order.
+    """
     if occurrence is None:
         return None
-    sources = [occurrence]
-    try:
-        component = getattr(occurrence, 'component', None)
-        if component is not None:
-            sources.append(component)
-    except Exception:
-        pass
-    for source in sources:
-        for attr in ('appearance', 'material', 'physicalMaterial'):
-            try:
-                candidate = getattr(source, attr, None)
-                if candidate is None:
-                    continue
-                if callable(candidate):
-                    candidate = candidate()
-                rgba = appearance_to_rgba(candidate)
-                if rgba is not None:
-                    return rgba
-            except Exception:
-                continue
+    sources = (occurrence,) + tuple(bodies)
+    candidates = [(source, 'appearance') for source in sources]
+    candidates.extend((source, attr) for source in sources
+                      for attr in ('material', 'physicalMaterial'))
+    component = _read(occurrence, 'component')
+    candidates.extend((component, attr)
+                      for attr in ('appearance', 'material', 'physicalMaterial'))
+    for source, attr in candidates:
+        candidate = _read(source, attr, unreadable=_UNREADABLE)
+        if candidate is None:
+            continue
+        if attr != 'appearance':
+            appearance = _read(candidate, 'appearance', unreadable=_UNREADABLE)
+            if appearance is not None:
+                candidate = appearance
+        return appearance_to_rgba(candidate)
     return None
-
-
-def material_name_for(link_name):
-    """Per-link material name (XML-safe)."""
-    from .utils import sanitize_name
-    return sanitize_name(link_name) + '_material'
 
 
 def rgba_to_urdf_string(rgba):

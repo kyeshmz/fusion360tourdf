@@ -1,0 +1,10 @@
+.git
+**/__pycache__
+*.pyc
+.venv
+venv
+artifacts
+build
+install
+log
+.opencode

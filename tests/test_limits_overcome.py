@@ -5,6 +5,10 @@ import sys
 import tempfile
 import types
 import unittest
+import json
+from pathlib import Path
+import xml.etree.ElementTree as ET
+from tests.test_package import write_meshes
 
 # Stub Fusion API before importing exporter code (mirrors test_exporter_logic).
 adsk = types.ModuleType('adsk')
@@ -78,12 +82,15 @@ class FakeOccurrence:
             isLightBulbOn=visible,
         )
         self.transform2 = FakeMatrix(matrix)
+        self.bRepBodies = [object() for _ in range(bodies)]
         self.isLightBulbOn = visible
 
 
 class FakeJointMotion:
     def __init__(self, joint_type, axis=None):
         self.jointType = joint_type
+        self.rotationValue = 0.0
+        self.slideValue = 0.0
         if axis is not None:
             self.rotationAxisVector = FakePoint(axis)
             self.slideDirectionVector = FakePoint(axis)
@@ -100,6 +107,8 @@ class FakeJoint:
         self.occurrenceTwo = occ_two
         self.geometryOrOriginOne = types.SimpleNamespace(origin=FakePoint(one_xyz))
         self.geometryOrOriginTwo = types.SimpleNamespace(origin=FakePoint(two_xyz))
+        self.geometryTwoTransform = FakeMatrix(identity_at(two_xyz))
+        self.transform = self.geometryTwoTransform
         self.jointMotion = motion or FakeJointMotion(0)
 
 
@@ -107,9 +116,18 @@ class FakeRoot:
     def __init__(self, joints, occurrences=(), as_built=()):
         self.joints = joints
         self.asBuiltJoints = list(as_built)
-        self._occs = list(occurrences)
-        self.allOccurrences = list(occurrences)
-        self.occurrences = list(occurrences)
+        self.allJoints = joints
+        self.allAsBuiltJoints = list(as_built)
+        endpoints = {}
+        self.bRepBodies = []
+        for joint in list(joints) + list(as_built):
+            for occ in (joint.occurrenceOne, joint.occurrenceTwo):
+                if occ is None:
+                    self.bRepBodies = [object()]
+                else:
+                    endpoints.setdefault(occ.name, occ)
+        self.allOccurrences = list(occurrences) or list(endpoints.values())
+        self.occurrences = self.allOccurrences
 
 
 class TransformsTest(unittest.TestCase):
@@ -189,28 +207,25 @@ class ValidateTest(unittest.TestCase):
         errors, warnings = val.validate_export(joints, inertial)
         self.assertTrue(any('ghost' in e for e in errors))
         self.assertTrue(any('inverted' in e for e in errors))
-        self.assertTrue(any('zero axis' in w for w in warnings))
+        self.assertTrue(any('zero axis' in e for e in errors))
 
 
 class ConfigTest(unittest.TestCase):
     def test_defaults_and_validation(self):
         config = cfg.load_config(None, None)
-        self.assertEqual(config['ros_version'], 'both')
-        bad = cfg.load_config(None, {'ros_version': 'ros3', 'effort': 'x',
-                                     'collision_method': 'mesh'})
-        self.assertEqual(bad['ros_version'], 'both')
-        self.assertEqual(bad['collision_method'], 'visual')
-        self.assertEqual(bad['effort'], 100.0)
-        self.assertTrue(cfg.wants_ros1({'ros_version': 'both'}))
-        self.assertTrue(cfg.wants_ros2({'ros_version': 'both'}))
-        self.assertFalse(cfg.wants_ros2({'ros_version': '1'}))
+        self.assertEqual(config, {'mesh_refinement': 'low', 'collision_method': 'visual',
+                                  'effort': 100.0, 'velocity': 100.0, 'root_occurrence': ''})
+        for invalid in ({'ros_version': 'ros3'}, {'effort': 'x'}, {'collision_method': 'mesh'},
+                        {'root_occurrence': True}, {'root_occurrence': 1}, {'root_occurrence': []}):
+            with self.assertRaises(ValueError):
+                cfg.load_config(overrides=invalid)
 
     def test_toml_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             with open(os.path.join(tmp, 'xacro_export.toml'), 'w') as fh:
-                fh.write('ros_version = "2"\ncollision_method = "primitive_box"\n')
+                fh.write('effort = 12.0\ncollision_method = "primitive_box"\n')
             config = cfg.load_config(tmp, None)
-            self.assertEqual(config['ros_version'], '2')
+            self.assertEqual(config['effort'], 12.0)
             self.assertEqual(config['collision_method'], 'primitive_box')
 
 
@@ -224,7 +239,44 @@ class MaterialsTest(unittest.TestCase):
 
 
 class JointOrientationTest(unittest.TestCase):
-    def test_joint_rpy_and_axis_in_parent_frame(self):
+    def test_driven_joint_limits_are_relative_to_exported_design_pose(self):
+        base = FakeOccurrence('base:1', 'base_link', identity_at([0, 0, 0]))
+        for kind, position, maximum, expected in (
+                (1, math.pi / 4, math.pi / 2, [-math.pi / 4, math.pi / 4]),
+                (2, 5.0, 20.0, [-.05, .15])):
+            with self.subTest(kind=kind):
+                matrix = identity_at([5, 0, 0])
+                if kind == 1:
+                    c, s = math.cos(position), math.sin(position)
+                    matrix = [c, -s, 0, 0, s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+                child = FakeOccurrence('arm:1', 'arm', matrix)
+                motion = FakeJointMotion(kind, axis=[0, 0, 1])
+                limits = types.SimpleNamespace(isMaximumValueEnabled=True,
+                    isMinimumValueEnabled=True, minimumValue=0.0, maximumValue=maximum)
+                if kind == 1:
+                    motion.rotationLimits, motion.rotationValue = limits, position
+                else:
+                    motion.slideLimits, motion.slideValue = limits, position
+                joint = FakeJoint('driven', child, base, [0, 0, 0], [0, 0, 0], motion)
+                joints, message = Joint.make_joints_dict(FakeRoot([joint]), 'ok')
+                self.assertEqual(message, 'ok')
+                self.assertAlmostEqual(joints['driven']['lower_limit'], expected[0])
+                self.assertAlmostEqual(joints['driven']['upper_limit'], expected[1])
+                if kind == 1:
+                    self.assertAlmostEqual(joints['driven']['rpy'][2] +
+                                           joints['driven']['upper_limit'], math.pi / 2)
+
+    def test_nonfinite_driven_position_aborts_extraction(self):
+        base = FakeOccurrence('base:1', 'base_link', identity_at([0, 0, 0]))
+        child = FakeOccurrence('arm:1', 'arm', identity_at([0, 0, 0]))
+        motion = FakeJointMotion(1, axis=[0, 0, 1])
+        motion.rotationValue = float('nan')
+        joint = FakeJoint('invalid', child, base, [0, 0, 0], [0, 0, 0], motion)
+        joints, message = Joint.make_joints_dict(FakeRoot([joint]), 'ok')
+        self.assertEqual(joints, {})
+        self.assertIn('Current joint position must be finite', message)
+
+    def test_joint_rpy_and_axis_in_joint_frame(self):
         parent = FakeOccurrence('base:1', 'base_link', identity_at([0, 0, 0]))
         child = FakeOccurrence('arm:1', 'arm', yaw90_at([100, 0, 0]))
         motion = FakeJointMotion(1, axis=[1, 0, 0])
@@ -236,16 +288,31 @@ class JointOrientationTest(unittest.TestCase):
         self.assertEqual(msg, 'ok')
         # Child yawed 90deg relative to identity parent.
         self.assertAlmostEqual(joints_dict['J1']['rpy'][2], math.pi / 2, places=5)
-        # Global X axis expressed in the identity parent frame stays X...
-        # (parent is identity here) so check rotation handling via helper:
-        axis = Joint._axis_in_parent_frame([1, 0, 0], child)
-        # Child yawed 90deg: global X in child frame is [0, -1, 0].
+        axis = joints_dict['J1']['axis']
         self.assertAlmostEqual(axis[0], 0.0, places=5)
         self.assertAlmostEqual(axis[1], -1.0, places=5)
 
+    def test_rotated_base_occurrence_does_not_rotate_the_design_root_frame(self):
+        parent = FakeOccurrence('base:1', 'base_link', yaw90_at([0, 0, 0]))
+        child = FakeOccurrence('arm:1', 'arm', yaw90_at([100, 0, 0]))
+        joint = FakeJoint('J1', child, parent, [0, 0, 0], [0, 0, 0], FakeJointMotion(1, axis=[1, 0, 0]))
+        joints, status = Joint.make_joints_dict(FakeRoot([joint]), 'ok')
+        self.assertEqual(status, 'ok')
+        self.assertAlmostEqual(joints['J1']['rpy'][2], math.pi / 2, places=12)
+        self.assertEqual(joints['J1']['axis'], [0, -1, 0])
+
+    def test_joint_can_reference_synthetic_design_root(self):
+        child = FakeOccurrence('arm:1', 'arm', yaw90_at([100, 0, 0]))
+        joint = FakeJoint('root_joint', child, None, [10, 0, 0], [20, 30, 40])
+        joints, status = Joint.make_joints_dict(FakeRoot([joint]), 'ok')
+        self.assertEqual(status, 'ok')
+        self.assertEqual(joints['root_joint']['parent'], 'base_link')
+        self.assertEqual(joints['root_joint']['xyz'], [0.2, 0.3, 0.4])
+        self.assertAlmostEqual(joints['root_joint']['rpy'][2], math.pi / 2, places=12)
+
 
 class WritersTest(unittest.TestCase):
-    def _design(self, ros_version='both', collision='visual'):
+    def _design(self):
         joints = {
             'J1': {'parent': 'base_link', 'child': 'arm', 'type': 'revolute',
                    'axis': [0, 0, 1], 'upper_limit': 1.0, 'lower_limit': -1.0,
@@ -266,59 +333,40 @@ class WritersTest(unittest.TestCase):
     def test_joint_xml_has_rpy_and_config_effort(self):
         joints, inertial = self._design()
         with tempfile.TemporaryDirectory() as tmp:
-            save_dir = os.path.join(tmp, 'bot_description')
-            os.makedirs(save_dir)
-            Write.write_urdf(joints, {}, inertial, 'bot_description', 'bot', save_dir,
-                             config={'effort': 50.0, 'velocity': 2.0,
-                                     'collision_method': 'visual'})
-            Write.write_materials_xacro(joints, {}, inertial, 'bot_description', 'bot', save_dir)
-            with open(os.path.join(save_dir, 'urdf', 'bot.xacro')) as fh:
-                text = fh.read()
-            self.assertIn('rpy="0 0 1.570796"', text)
-            self.assertIn('effort="50"', text)
-            # Tiny inertia survives instead of truncating to 0.
-            self.assertIn('1e-09', text)
-            # Per-link color material emitted.
-            with open(os.path.join(save_dir, 'urdf', 'materials.xacro')) as fh:
-                mats = fh.read()
-            self.assertIn('base_link_material', mats)
+            save_dir = Path(tmp) / 'bot_description'
+            Write.write_ros2_package(save_dir, 'bot', joints, inertial, write_meshes=write_meshes,
+                                     config={'effort': 50.0, 'velocity': 2.0})
+            robot = ET.parse(save_dir / 'urdf/bot.xacro').getroot()
+            self.assertAlmostEqual(float(robot.find('joint/origin').get('rpy').split()[2]), math.pi / 2)
+            self.assertEqual(float(robot.find('joint/limit').get('effort')), 50)
+            self.assertEqual(float(robot.find("link[@name='base_link']/inertial/inertia").get('ixx')), 1e-9)
+            self.assertEqual(robot.find("link[@name='base_link']/visual/material").get('name'), 'base_link_material')
+            self.assertEqual(robot.find("link[@name='base_link']/visual/material/color").get('rgba'), '1 0 0 1')
 
     def test_primitive_box_collision(self):
         joints, inertial = self._design()
         with tempfile.TemporaryDirectory() as tmp:
-            save_dir = os.path.join(tmp, 'bot_description')
-            os.makedirs(save_dir)
-            Write.write_urdf(joints, {}, inertial, 'bot_description', 'bot', save_dir,
-                             config={'collision_method': 'primitive_box',
-                                     'effort': 100.0, 'velocity': 100.0})
-            with open(os.path.join(save_dir, 'urdf', 'bot.xacro')) as fh:
-                text = fh.read()
-            self.assertIn('<box size=', text)
+            save_dir = Path(tmp) / 'bot_description'
+            Write.write_ros2_package(save_dir, 'bot', joints, inertial, write_meshes=write_meshes,
+                                     config={'collision_method': 'primitive_box'})
+            robot = ET.parse(save_dir / 'urdf/bot.xacro').getroot()
+            self.assertEqual(robot.find("link[@name='base_link']/collision/geometry/box").get('size'), '0.2 0.2 1')
 
     def test_ros2_and_sidecar_files(self):
-        joints, _ = self._design()
+        joints, inertial = self._design()
         joints['Jdup'] = {'parent': 'base_link', 'child': 'arm', 'type': 'fixed',
                           'axis': [0, 0, 0], 'upper_limit': 0.0, 'lower_limit': 0.0,
                           'xyz': [0, 0, 0], 'rpy': [0, 0, 0]}
-        tree, closing, warnings = val.detect_closing_joints(joints)
         with tempfile.TemporaryDirectory() as tmp:
-            save_dir = os.path.join(tmp, 'bot_description')
-            os.makedirs(save_dir)
-            Write.write_ros2_control_xacro(tree, 'bot_description', 'bot', save_dir)
-            Write.write_ros2_controllers_yaml('bot_description', 'bot', save_dir, tree)
-            Write.write_ros2_display_launch_py('bot_description', 'bot', save_dir)
-            Write.write_ros2_gazebo_launch_py('bot_description', 'bot', save_dir)
-            Write.write_ros2_package_files('bot_description', 'bot', save_dir)
-            Write.write_robot_data_yaml('bot_description', 'bot', save_dir, tree,
-                                        closing, warnings)
-            for rel in ['urdf/bot.ros2_control.xacro', 'config/controllers.yaml',
-                        'launch/display.launch.py', 'launch/gazebo.launch.py',
+            save_dir = Path(tmp) / 'bot_description'
+            Write.write_ros2_package(save_dir, 'bot', joints, inertial, write_meshes=write_meshes)
+            for rel in ['urdf/bot.xacro', 'config/controllers.yaml',
+                        'launch/display.launch.py', 'launch/control.launch.py',
                         'package.xml', 'CMakeLists.txt', 'config/robot_data.yaml']:
                 self.assertTrue(os.path.exists(os.path.join(save_dir, rel)), rel)
             with open(os.path.join(save_dir, 'config', 'robot_data.yaml')) as fh:
-                sidecar = fh.read()
-            self.assertIn('closing_joints:', sidecar)
-            self.assertIn('Jdup', sidecar)
+                sidecar = json.load(fh)
+            self.assertEqual(sidecar['closing_joints'][0]['joint'], 'Jdup')
 
 
 class OccurrenceWalkTest(unittest.TestCase):

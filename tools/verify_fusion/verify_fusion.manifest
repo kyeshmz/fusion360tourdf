@@ -1,0 +1,8 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "script",
+  "author": "fusion360tourdf contributors",
+  "description": {"": "Verify owned Fusion fixtures against production ROS 2 exports"},
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
