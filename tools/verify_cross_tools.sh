@@ -5,8 +5,8 @@ if [[ $# != 1 ]]; then
   exit 2
 fi
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-output=$(realpath -m "$1")
-mkdir -p "$output"
+mkdir -p "$1"
+output=$(cd "$1" && pwd -P)
 run=$(mktemp -d "$output/cross-tools-XXXXXX")
 trap 'printf "Cross-tool artifacts at %s\n" "$run"' EXIT
 python=${PYTHON:-python3}

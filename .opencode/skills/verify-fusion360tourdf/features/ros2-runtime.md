@@ -29,6 +29,11 @@ Require `ros.json` from both distributions. Confirm controllers are active,
 the action error code is zero, feedback matches the commanded values, and TF
 matches the expected poses. Verify output ownership and container cleanup.
 
+To verify an actual CAD export rather than generated fixtures, pass the native bundle as
+the third argument to `tools/verify_docker.sh`. Use `tools/verify_export.py BUNDLE --output OUTPUT`
+for the complete loader, Blender, and both-distribution recipe. Require
+`evidence_kind: installed-native-fusion-export` and installed native-asset hashes in each ROS report.
+
 ## Gotchas
 
 The image explicitly selects CycloneDDS. A pass does not certify other RMW

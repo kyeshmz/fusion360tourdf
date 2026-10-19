@@ -209,6 +209,10 @@ consistency. You must still compare the result against the Fusion design.
 
 ## Verify a real Fusion export
 
+For a reproducible model and one downstream command that builds and commands its actual
+native export on both ROS distributions, use the [rotary-slide demo workflow](demo-workflow.md).
+The optional third argument to `tools/verify_docker.sh` selects a native bundle instead of generated fixtures.
+
 Use [the native Fusion verifier](../tools/verify_fusion/README.md) for isolated
 owned-document fixtures in parametric and direct modes. It is a real application
 entry point, not a mocked test. Until an actual run produces its report, its

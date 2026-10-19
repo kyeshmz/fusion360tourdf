@@ -1,5 +1,6 @@
 """Offline tests for fusion360tourdf exporter logic (no Fusion required)."""
 import os
+import struct
 import sys
 import tempfile
 import types
@@ -212,6 +213,30 @@ class FakeCollection(list):
 
 
 class MeshExtractionTest(unittest.TestCase):
+    def test_native_body_mesh_is_transformed_once_into_each_occurrence_context(self):
+        native = object()
+        one, two = self.occurrence('wheel:1'), self.occurrence('wheel:2')
+        for occurrence in (one, two):
+            occurrence.bRepBodies = FakeCollection([types.SimpleNamespace(nativeObject=native)])
+        one.transform2 = FakeMatrix([0, -1, 0, 10, 1, 0, 0, 20, 0, 0, 1, 30, 0, 0, 0, 1])
+        two.transform2 = FakeMatrix(identity_at([40, 50, 60]))
+        design, exports = self.design([one, two])
+        with tempfile.TemporaryDirectory() as tmp:
+            targets = {name: Path(tmp) / (name + '.stl') for name in ('base_link', 'wheel_2')}
+            utils.export_stl(design, targets, config={'root_occurrence': 'wheel:1'})
+            self.assertEqual([option.geometry for option in exports], [native, native])
+            triangle = struct.unpack_from('<12fH', targets['base_link'].read_bytes(), 84)
+            original = struct.unpack_from('<12fH', mesh_bytes(), 84)
+            for offset in (3, 6, 9):
+                x, y, z = original[offset:offset+3]
+                self.assertEqual(triangle[offset:offset+3], (100-y, 200+x, 300+z))
+            x, y, z = original[:3]
+            self.assertEqual(triangle[:3], (-y, x, z))
+            repeated = struct.unpack_from('<12fH', targets['wheel_2'].read_bytes(), 84)
+            for offset in (3, 6, 9):
+                x, y, z = original[offset:offset+3]
+                self.assertEqual(repeated[offset:offset+3], (400+x, 500+y, 600+z))
+
     def occurrence(self, name, component='wheel'):
         occ = FakeOccurrence(name, component, [0, 0, 0])
         occ.bRepBodies = FakeCollection([object()])

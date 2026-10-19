@@ -26,6 +26,8 @@ before the run so cached modules cannot stand in for the current checkout.
 Add `tools/verify_fusion` from the repository as a Fusion script and run it.
 The expected eleven cases include separate parametric/direct documents and an
 editable sketch/extrusion case. Keep `report.json` and generated packages.
+Parametric fixed cases use as-built joints; direct fixed cases use grounding because Fusion
+does not create as-built joints in direct mode. These are distinct evidence cases.
 
 Inspect the report's provenance, source-state preservation and cleanup, not
 only its overall status. Original-reference invalidation remains explicitly
@@ -38,6 +40,10 @@ dimensions and nonzero joint poses against the CAD design. Repeat with direct
 root bodies. A failed export must not publish a new partial destination.
 
 ## Gotchas
+
+For a retained live model and actual-export Docker motion checks, use
+[`tools/create_demo` and `tools/verify_export.py`](../../../../docs/demo-workflow.md).
+The downstream verifier must receive the native bundle, not regenerate a substitute robot.
 
 Offline Fusion doubles do not prove vendor mesh coordinates. No command in
 this repository launches Fusion headlessly. If the application is unavailable,

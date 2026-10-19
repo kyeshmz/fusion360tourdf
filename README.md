@@ -1,36 +1,86 @@
 # fusion360tourdf
 
-Export an Autodesk Fusion assembly as a ROS 2 URDF description package with
-STL meshes, RViz launch files, and optional mock-control launch files.
-The exporter runs inside Fusion and uses its Python API plus the standard
-library. ROS and Blender are verification tools, not Fusion dependencies.
+Export Autodesk Fusion assemblies as ROS 2 robot description packages, including STL meshes, joints, mass, and inertia. The exporter runs inside Fusion without third-party Python dependencies and preserves the source design’s editable history.
 
-This is a fork of [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf).
-The maintained output target is ROS 2 Humble and Jazzy. PyBullet-specific
-behavior, other CAD systems, ROS 1, SDF, MJCF, and simulator backends are out of
-scope. Fusion input cases are tracked separately from those output exclusions.
+Generated packages target **ROS 2 Humble and Jazzy**. Launch them in RViz or use mock ros2_control hardware to command joints and inspect their feedback.
 
-## Read the support and evidence boundaries
+[Install and export](#install-and-export) · [Use in ROS 2](#use-the-package-in-ros-2) · [Reproduce the demo](#reproduce-the-verified-demo) · [Configuration](#configure-the-export) · [Support and limits](#supported-inputs-and-limits)
 
-Use Fusion May 2025 or newer for explicit STL export units. TOML configuration
-requires Python 3.11 or newer, as supplied by current Fusion releases.
+## Example: Fusion to URDF
 
-The [Fusion use-case matrix](docs/fusion-coverage.md) distinguishes implemented
-inputs, executable offline tests, native-Fusion verification, and remaining
-input gaps. [Nine pinned repository audits](docs/related-work.md) inform that
-matrix. Source inspection is not a runtime pass or a universal superiority claim.
+The six-link rotary-slide demo includes a grounded mast, a revolute joint, a nested slider, and two instances of one sensor component.
 
-The local test suites exercise the real package writer, mesh loaders, Blender,
-and Docker ROS 2 motion. Fusion API doubles do not establish that the actual
-application exports proxy geometry correctly. See
-[the verification results](docs/verification-results.md) for exact evidence.
+| Native Fusion assembly | Exported URDF: zero pose | Exported URDF: moved pose |
+| --- | --- | --- |
+| ![Rotary-slide robot in the native Fusion viewport](docs/images/rotary-slide-fusion.png) | ![Exported rotary-slide meshes rendered in Blender at joint zero](docs/images/rotary-slide-zero.png) | ![Exported rotary-slide meshes after 45 degrees of rotation and 25 mm of extension](docs/images/rotary-slide-moved.png) |
 
-## Install in Fusion
+The Blender pictures use the actual exported meshes with neutral preview shading. The moved pose rotates 45 degrees and extends 25 mm; it does not simulate physics. [Reproduce the model and pictures](docs/demo-workflow.md).
 
-Open a terminal in the complete checkout and run the installer for your platform.
-The launchers require host Python 3.11 or newer underneath. Fusion's embedded
-Python does not run the installer. The launchers do not download Python or other
-dependencies, request administrator access, or pause for input.
+## What you get
+
+Each export creates a self-contained ROS 2 description package:
+
+```text
+your_robot_description/
+├── package.xml
+├── CMakeLists.txt
+├── urdf/your_robot.xacro
+├── meshes/*.stl
+├── viewers/
+│   ├── display.launch.py
+│   └── display.rviz
+├── launch/control.launch.py
+└── config/
+    ├── controllers.yaml
+    └── robot_data.yaml
+```
+
+Movable robots include the control launch file and controller configuration. Fixed-only robots omit those assets. `robot_data.yaml` records the topology, warnings, and any removed loop-closing constraints; its JSON formatting is valid YAML.
+
+### Archive the package or viewers
+
+The display launcher and RViz configuration live together in `viewers/`.
+Control files stay under `launch/` and `config/`. The exporter does not copy
+Blender or validation helpers into the robot package.
+
+This layout applies to new exports. Re-export an older model into a fresh
+directory. Moving old files alone does not update their launch and CMake paths.
+
+From the export's parent directory, create either archive with Python's
+standard ZIP command:
+
+```bash
+	python3 -m zipfile -c my_robot_description.zip my_robot_description
+	python3 -m zipfile -c my_robot_viewers.zip my_robot_description/viewers
+```
+
+The first archive contains the complete buildable ROS package. The second
+contains only `viewers/`. It requires the matching description package's URDF,
+meshes, and package metadata. Extract the viewer folder into that package.
+Keep the full directory layout when building the complete package.
+The launch command remains `ros2 launch my_robot_description display.launch.py`.
+
+## Requirements
+
+Install the tools needed for your workflow:
+
+| Task | Requirements |
+| --- | --- |
+| Install the exporter | Host Python 3.11+ on `PATH`; the launchers do not download it |
+| Export from CAD | Autodesk Fusion May 2025 or newer on macOS or Windows; Python 3.11+ for TOML configuration |
+| Load the package | ROS 2 Humble or Jazzy on your ROS machine |
+| Run offline tests | Python 3.11+ |
+| Reproduce end-to-end checks | Fusion, Python test requirements, Blender, and a running Docker Engine with free disk space |
+
+ROS and Blender are not exporter dependencies. Fusion and ROS can run on different computers. Native verification used Fusion 2705.1.30; the README renders used Blender 5.2.2 LTS.
+
+## Install and export
+
+Clone or download the complete repository. Open a terminal in the checkout and
+run the installer for your platform. The launchers require host Python 3.11 or
+newer. Fusion's embedded Python does not run the installer. The launchers do not
+download Python or other dependencies, request administrator access, or pause
+for input.
 
 On Windows:
 
@@ -88,11 +138,16 @@ On Windows, use the same options:
 files. The launchers also work when invoked by path from another directory.
 Relative `--scripts-dir` paths stay relative to your terminal's current directory.
 
-In Fusion, open **Utilities**, **Add-ins**, and **Scripts and Add-ins**.
-Select `URDF_Exporter` and choose **Run**. If it is absent after a restart,
-use the **+** command to link the installed directory printed by the installer.
+In Fusion, open **Utilities > Add-ins > Scripts and Add-ins > Scripts**.
+If `URDF_Exporter` is absent after a restart, use the **+** command to link the
+installed directory printed by the installer.
 You can also link the checkout's script directory instead of copying it.
 The installer does not start the script or change Fusion's folder preferences.
+Prepare the model using the checklist below, then select `URDF_Exporter` and
+choose **Run**. Choose a fresh output parent folder and inspect the resulting
+`your_robot_description` directory.
+
+### Update an installation
 
 Save your work and close Fusion before replacing an installation. Use
 `--update` with the same location:
@@ -133,181 +188,64 @@ The helper accepts the same options.
 
 You can still copy the complete `URDF_Exporter` directory manually. Do not copy
 only `URDF_Exporter.py` or merge old modules into a new installation.
-Save your work and restart Fusion after replacing exporter modules so cached
-Python imports do not continue running an older version.
-The installer does not close Fusion for you.
-Running Fusion through Wine is not a supported Autodesk platform and has not
-been certified by these tests.
+Restart Fusion after replacing exporter modules so cached Python imports do
+not continue running an older version. The installer does not close Fusion for
+you. Native Windows and macOS installer jobs have not run for this change.
+Local wrapper checks used Linux Bash, not native Fusion registration. Running
+Fusion through Wine is not a supported Autodesk platform and has not been
+certified by these tests.
 
-Fusion and ROS do not need to run on the same computer. Copy the generated
-description package into your ROS 2 workspace after export. The shell-based
-verification instructions target Linux or WSL2 with Bash and Docker Engine.
+### Prepare the model
 
-## Prepare the assembly
+Check these conditions before exporting:
 
-Export reads the active design's root assembly, not only the currently activated
-component. Select a complete connected mechanism through visibility and
-configuration. Hidden geometry does not automatically suppress its constraints.
+- Make each independently moving link a component occurrence; a link can contain multiple solid bodies.
+- Name the chassis `base_link`, or configure an exact `root_occurrence` path.
+- Connect every selected link with rigid, revolute, or slider joints, fixed groups, or supported grounding relationships.
+- Set both bounds for a bounded joint. Sliders require finite lower and upper travel limits.
+- Assign physical materials and check mass properties in Fusion.
+- Use visibility to select geometry, but suppress a joint only when you intend to remove its constraint.
 
-### Components, bodies, and names
+**Keep Capture Design History enabled.** Export reads the active design’s root assembly, not only the activated component. It must not reset joints, rename components, move bodies, or remove history. Leave the assembly unchanged while export runs.
 
-- Make each independently moving physical link a component occurrence.
-  Several bodies can belong to one link.
-- Repeated instances must keep their distinct occurrence paths. Reusing one
-  component definition is different from giving multiple instances one identity.
-- Nested components can contain their own bodies and child occurrences. Each
-  link's mesh and mass must use only its own selected bodies, not its descendants
-  a second time.
-- Name the intended chassis `base_link` for the least ambiguous default.
-  Use `root_occurrence` when selecting another root explicitly.
-- Avoid names that become identical after unsafe characters are replaced with
-  underscores. The exporter rejects collisions instead of overwriting meshes.
-- Root-owned BRep bodies support imported CAD without requiring a new component
-  solely to hold the chassis. Mesh-only imports remain a separate input gap.
+Existing output is never overwritten. The exporter stages files and publishes the package only after mesh validation succeeds; canceling the folder dialog creates no package. The first word of the design/root name determines the package name: `My Robot` produces `my_description`.
 
-### Mechanics and physical properties
+See the [model requirements](DESIGN_RULES.md) and [assembly/export guide](docs/exporting.md) for nested components, root selection, frames, visibility, and history-related errors.
 
-- Ordinary and as-built rigid, revolute, and slider joints are the maintained
-  joint types. A revolute without bounds becomes continuous. A slider needs
-  finite lower and upper travel limits.
-- Set both bounds or neither where that joint type permits it. One-sided bounds
-  must not silently become zero travel.
-- The current design pose becomes URDF joint zero. Bounds subtract the current
-  driven position so the physical travel range is retained.
-- Suppressing a joint changes the mechanism. Hiding its marker does not.
-  Locking a joint means fixed-at-current-pose behavior, not an active actuator.
-- Rigid groups are Fusion assembly constraints. They must become fixed
-  relationships or produce an explicit conflict, not disappear silently.
-- Ground To Parent is also a fixed relationship. Physical parents and proven
-  fixed ancestry are translated without changing source flags. An unresolved
-  bodyless parent/world frame fails explicitly instead of being welded to a
-  guessed root. This is partial grounding support, not general bodyless-frame
-  export.
-- Every selected link must connect to the root. A disconnected part is not
-  automatically welded merely because it appears near another body.
-- Assign physical materials and check mass properties in Fusion. Visual
-  appearance colors and physical material density are different properties.
+## Use the package in ROS 2
 
-The current STL-based output has one appearance color per link. It does not
-preserve per-face textures or a distinct material for every body in a combined
-mesh. Those are fidelity limits, not simulator exclusions.
-
-Color extraction supports modern primary colors and known legacy
-`appearanceProperties` color values. Native RGB and opacity values are bytes,
-not normalized fractions. A usable primary color can be retained even when an
-appearance also has texture metadata; the texture pattern is not exported.
-When no supported flat color is available, the writer uses silver rather than
-another material's color. This does not change physical density or mass.
-
-Use Z-up and X-forward where possible. Fusion uses centimeters internally.
-The exporter converts joint positions and physical properties to SI units,
-requests millimeter STL output explicitly, and writes mesh scale `0.001`.
-
-### Root selection and endpoint direction
-
-The configured `root_occurrence` takes precedence. Use an exact occurrence path,
-not a component name that can refer to several instances. Use `design_root` to
-select direct root bodies explicitly. Without configuration,
-selection prefers an unambiguous `base_link`, direct root bodies, a unique
-grounded occurrence, and then a unique graph root. Ambiguous candidates require
-an explicit choice rather than a first-match guess.
-
-Joint edges are oriented outward from the selected root. Reversal must update
-frames and axes as well as endpoint names. Grounding the base is not a reason
-to modify the source design before export.
-
-Selecting the root changes topology, not the design coordinate system. Meshes
-remain in the design pose, with URDF visual origins accounting for link frames.
-It does not restrict the export to that occurrence's subtree. Do not recenter
-meshes by hand after export.
-
-## Keep design history intact
-
-**Do not disable Capture Design History to make an export work.** Autodesk
-documents that changing a parametric design to direct mode removes its timeline
-and history. The exporter must not perform that conversion, rewind the timeline,
-reset driven joints, rename source components, or move bodies.
-
-The extraction path reads current joint transforms instead of the original
-face, edge, or origin references. This matters after edits invalidate geometry
-that originally defined a joint. It does not fall back to old geometry when a
-required current transform is unavailable. Rigid as-built joints legitimately
-have no joint geometry. Their fixed relationship comes from the occurrence pose.
-
-If a moving joint has no usable current frame, repair it in Fusion. Valid old
-geometry alone does not rescue this case. Do not replace its anchor with an
-arbitrary origin or delete history to hide the failure. Inspect suppressed,
-invalid, or unresolved features and recompute the design before retrying.
-
-Parametric and direct inputs have separate regression cases. Native confirmation
-requires [the real Fusion verifier](tools/verify_fusion/README.md), not a Docker
-test or a temporary direct-design staging document.
-
-## Export the package
-
-1. Open the intended design in Fusion's Design workspace.
-2. Set geometry visibility and inspect the joints and physical properties.
-3. Run **URDF_Exporter** from Scripts and Add-ins.
-4. Choose an output parent folder. Cancellation does not export a package.
-5. Inspect the resulting `<robot>_description` directory and any reported errors.
-
-Leave the assembly unchanged until export completes. Concurrent editing or
-driving the same design from another script is not a verified workflow.
-
-The UI uses the first whitespace-delimited token of the root/design name,
-sanitized to a lowercase ROS name. For example, `My Robot` produces
-`my_description`, not `my_robot_description`. Use a fresh package destination.
-Existing output is not overwritten. Files are staged
-privately and published only after required mesh exports pass validation.
-Do not run concurrent exports into the same destination.
-
-The package layout is:
-
-```text
-<robot>_description/
-  package.xml
-  CMakeLists.txt
-  urdf/<robot>.xacro
-  meshes/<link>.stl
-  viewers/display.launch.py
-  viewers/display.rviz
-  launch/control.launch.py
-  config/controllers.yaml
-  config/robot_data.yaml
-```
-
-The robot xacro is self-contained. Movable robots receive control launch and
-controller configuration. Fixed-only robots do not need empty hardware systems.
-`robot_data.yaml` contains topology, export metadata, warnings, and removed
-loop-closing constraints. JSON formatting in these `.yaml` files is valid YAML.
-
-### Archive the package or viewers
-
-The display launcher and RViz configuration live together in `viewers/`.
-Control files stay under `launch/` and `config/`. The exporter does not copy
-Blender or validation helpers into the robot package.
-
-This layout applies to new exports. Re-export an older model into a fresh
-directory. Moving old files alone does not update their launch and CMake paths.
-
-From the export's parent directory, create either archive with Python's
-standard ZIP command:
+Copy the generated description package into your ROS workspace’s `src` directory. In a sourced ROS environment, install dependencies, build the workspace, and launch the display:
 
 ```bash
-	python3 -m zipfile -c my_robot_description.zip my_robot_description
-	python3 -m zipfile -c my_robot_viewers.zip my_robot_description/viewers
+source /opt/ros/jazzy/setup.bash
+cd your_ros2_workspace
+rosdep install --from-paths src --ignore-src -r -y
+colcon build
+source install/setup.bash
+ros2 launch your_robot_description display.launch.py
 ```
 
-The first archive contains the complete buildable ROS package. The second
-contains only `viewers/`. It requires the matching description package's URDF,
-meshes, and package metadata. Extract the viewer folder into that package.
-Keep the full directory layout when building the complete package.
-The launch command remains `ros2 launch my_robot_description display.launch.py`.
+For Humble, source `/opt/ros/humble/setup.bash` instead. Replace `your_robot_description` with the generated package name.
 
-URDF describes a tree. A closure sidecar records information but does not enforce
-the original mechanism. A four-bar linkage reduced to a tree is not equivalent
-closed-chain motion. Generalized joints and motion coupling must not be
-advertised as preserved unless their conversion is implemented and tested.
+Use the copy install shown above for a self-contained install space.
+`--symlink-install` leaves meshes dependent on the source workspace. The strict
+portable-mesh checks, including the native-package old-root guard, reject
+external source-workspace targets. The symlink-install probes did not reach
+controller verification and are not passing full-runtime evidence.
+
+The display launch starts RViz and the joint-state GUI. To run without either GUI:
+
+```bash
+ros2 launch your_robot_description display.launch.py gui:=false rviz:=false
+```
+
+For a movable robot, start the mock joint-state broadcaster and trajectory controller:
+
+```bash
+ros2 launch your_robot_description control.launch.py
+```
+
+Do not run a separate joint-state publisher against the same joints during mock control. Mock hardware tests commands and state propagation, not forces, collisions, dynamics, or physical hardware. The Docker tests use CycloneDDS; generated packages do not select a middleware implementation.
 
 ## Configure the export
 
@@ -324,161 +262,93 @@ velocity = 100.0
 root_occurrence = ""
 ```
 
-| Option | Meaning |
+| Option | Values or meaning |
 | --- | --- |
-| `mesh_refinement` | `low`, `medium`, or `high` Fusion tessellation. Higher detail increases mesh size. |
-| `collision_method` | `visual` reuses detailed geometry. `primitive_box` uses a body bounding box when available and otherwise keeps mesh collision. |
-| `effort` | Positive finite default joint effort, in newton-meters for rotation or newtons for translation. |
-| `velocity` | Positive finite default velocity, in radians per second or meters per second for the joint type. |
-| `root_occurrence` | Empty for automatic root selection, an exact source occurrence path, or `design_root` for direct root bodies. |
+| `mesh_refinement` | `low`, `medium`, or `high` STL tessellation |
+| `collision_method` | `visual` mesh collision, or `primitive_box` where bounds are available |
+| `effort` | Positive finite limit in N·m for rotation or N for translation |
+| `velocity` | Positive finite limit in rad/s or m/s, depending on joint type |
+| `root_occurrence` | Automatic selection when empty; otherwise an exact occurrence path or `design_root` for root-owned bodies |
 
-Unknown keys, malformed values, and nonfinite limits abort export. Old
-`ros_version`, `use_legacy_copy`, and transmission/control switches are no
-longer valid. There is no destructive copy mode to enable as a workaround.
+Unknown options and invalid values stop export. Obsolete ROS 1, legacy-copy, and transmission/control switches are not supported. See the [configuration and frame details](docs/exporting.md#configure-the-exporter).
 
-## Load in ROS 2
+## Reproduce the verified demo
 
-Place the generated package under a workspace's `src` directory. In a shell
-with the desired ROS distribution sourced, run from the workspace root.
+Run the Fusion script in `tools/create_demo` to create the assembly pictured above. It exports a native `.f3d` archive, a ROS package, independent pose expectations, a source-preservation receipt, and a Fusion viewport PNG.
 
-The commands below use `my_robot_description` as the example package name.
-Replace it with the actual directory/package name from your export. For Jazzy,
-source `/opt/ros/jazzy/setup.bash` first. Use `/opt/ros/humble/setup.bash` for
-Humble instead.
+From the checkout root, install the separate verification requirements and test that actual native export:
 
 ```bash
-	rosdep install --from-paths src --ignore-src -r -y
-	colcon build
-	source install/setup.bash
-	ros2 launch my_robot_description display.launch.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python tools/verify_export.py /path/to/rotary-slide-bundle \
+  --output artifacts
 ```
 
-Use the copy install shown above for a self-contained install space.
-`--symlink-install` keeps dependencies on the source workspace and is rejected
-by the strict portable-mesh checks. Its full launch and controller behavior is
-not certified by those checks.
+The runner checks mesh loading and forward kinematics, renders zero/moved previews in Blender, then builds and commands the supplied package in Docker on Humble and Jazzy. It does not generate a substitute robot fixture.
 
-The default display launch starts the joint-state GUI and RViz. For headless
-loading, use:
+Follow the [demo workflow](docs/demo-workflow.md) for Fusion setup, commands, evidence files, and [README picture refresh instructions](docs/demo-workflow.md#refresh-the-readme-pictures).
 
-```bash
-	ros2 launch my_robot_description display.launch.py gui:=false rviz:=false
-```
+## Verification
 
-For a movable robot's mock hardware, use:
+The October 18, 2026 records below cover prior source snapshots. The native
+results were recorded on macOS, not by this Linux publication session, and do
+not certify the merged revision. Separate shell-installer and viewer-layout
+baseline receipts are retained in the verification results.
 
-```bash
-	ros2 launch my_robot_description control.launch.py
-```
+The October 18 checks covered the following cases:
 
-This starts the joint-state broadcaster and joint-trajectory controller.
-Do not run a separate joint-state publisher against the same joints at the
-same time. Mock hardware checks command/state propagation. It does not connect
-to real hardware or simulate forces, collisions, or dynamics.
-
-The verified Docker environment uses CycloneDDS. On a native ROS installation
-with `rmw_cyclonedds_cpp` installed, select the same backend with
-`export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`. The recorded Humble FastDDS
-service-response failure remains separate from exporter behavior.
-
-## Run the verification suites
-
-The exporter has no third-party Python dependency. The offline suite needs
-Python 3.11 or newer for TOML-file tests:
-
-```bash
-	python3 -m unittest discover -s tests -v
-	python3 tools/verify_fusion_coverage.py --output artifacts/fusion-coverage
-	bash tools/verify_docker.sh humble artifacts
-	bash tools/verify_docker.sh jazzy artifacts
-```
-
-Docker commands require engine access but no sudo once access is configured.
-Docker socket access grants root-equivalent capability. Do not make the socket
-world-writable. Each test run keeps logs and JSON reports in a unique directory.
-
-Install optional loader requirements into a separate environment. With Blender
-and urdfdom available, run:
-
-```bash
-	python3 -m venv .venv
-	.venv/bin/python -m pip install -r requirements-test.txt
-	PYTHON="$PWD/.venv/bin/python" bash tools/verify_cross_tools.sh artifacts
-```
-
-The cross-tool suite checks real STL geometry, numeric FK, and negative cases.
-Blender saves `inspection.blend` and `blender.json`. It is a geometry/placement
-check, not a native complete URDF validator. Docker tests build/install generated
-packages, activate controllers, send a trajectory, and compare feedback and TF.
-
-Run [the native Fusion verifier](tools/verify_fusion/README.md) to test real
-history modes, proxy mesh coordinates, and source-state preservation. A prepared
-script is not an executed native pass. `--require-complete` on the coverage
-runner must not turn offline success into full Fusion proof.
-
-## Known input gaps
-
-Full Fusion use-case coverage is not yet proven. These remain in-scope gaps,
-not simulator or other-CAD exclusions:
-
-- Motion-link conversion into affine URDF mimic relations is unimplemented.
-- Mesh-only or mixed-mesh links lack a validated physical-property/export policy.
-- Ordinary joints requiring bodyless assembly or reference-frame links are unimplemented.
-- Active cylindrical, planar, pin-slot, and ball joints have no verified DOF decomposition.
-- Combined STL output does not preserve separate body/face materials or textures.
-
-Ground To Parent support is partial. Physical parents and explicitly fixed
-ancestry work in the offline corpus. Unresolved bodyless/world frames and
-unproven world anchors fail explicitly. A closed-loop sidecar records closure
-information but does not enforce the original closed mechanism.
-
-Native Fusion execution remains unverified. The prepared verifier's original
-joint-reference invalidation case is explicitly `not_exercised`, even if its
-other cases pass. See [the generated matrix](docs/fusion-coverage.md) for the
-exact implementation and evidence status of each declared case.
-
-## Troubleshoot an export
-
-| Symptom | Action |
+| Check | Observed result |
 | --- | --- |
-| Export stopped after a history edit. | Inspect the named joint's current frame and unresolved references. Keep history enabled. Do not roll/delete the timeline as an exporter workaround. |
-| Rigid as-built joint has no geometry. | Null geometry is legitimate. Use the current exporter; it should derive the fixed pose from occurrences. Report a failure with the verifier's evidence. |
-| Root is missing or ambiguous. | Name one chassis `base_link` or configure an exact `root_occurrence`. Distinguish repeated instances and grounded candidates. |
-| Link is disconnected. | Add the intended mechanical joint/rigid constraint or exclude the geometry deliberately. Spatial proximity is not a fixed connection. |
-| A hidden joint marker still exports. | Hiding a marker does not suppress a joint. Use suppression only when you intend to remove the constraint. |
-| A selected mechanism depends on hidden geometry. | Make the required endpoint visible or change the assembly selection. Do not drop one side of an active constraint silently. |
-| Grounding has no representable parent or world anchor. | Inspect the named fixed ancestry and root selection. Choose a proven grounded physical root where appropriate. Do not disable grounding merely to suppress the error. Missing bodyless frames remain an implementation gap. |
-| Duplicate identity or missing mesh reference. | Inspect occurrence paths and names after sanitization. Component names alone do not identify repeated instances. |
-| Invalid mass or inertia. | Check solid geometry, material density, units, and Fusion physical-property calculation. Mesh-only inputs need a separate physical-property policy. |
-| Unsupported joint, motion link, or rigid conflict. | Read the named input and the use-case matrix. Do not reinterpret an unimplemented Fusion input as a successful free-moving mechanism. |
-| Output directory exists. | Choose a fresh output parent/name. Preserve the previous valid package. |
-| Scale or placement is wrong. | Check explicit STL units and compare a known dimension in Blender and Fusion. Do not fix scale by offsetting meshes manually. |
-| ROS controller service fails. | Retain runtime logs and selected RMW. Repeat the documented Docker test; see the recorded CycloneDDS/FastDDS distinction. |
-| Docker reports permission denied. | Fix engine access outside the agent or restart the login/session after group changes. Do not use a world-writable socket. |
+| Offline regressions | 194 tests passed |
+| Native Fusion fixtures | Eleven parametric/direct cases passed |
+| Native six-link demo | 449 CAD/export assertions passed |
+| Independent loader and Blender | Real exported meshes, zero/moved placement, and rejected wrong-axis/shifted/missing-mesh controls |
+| ROS 2 Humble and Jazzy | Installed native assets matched hashes; controllers activated; trajectory, joint feedback, and six-link transforms passed |
 
-See [the full testing guide](docs/testing.md) and
-[model requirements](DESIGN_RULES.md) for additional checks.
+See the [verification results](docs/verification-results.md) for versions, source hashes, local receipts, and coverage limits. These results cover the exercised inputs, not every Fusion assembly or a comparison run against other exporters.
 
-## Maintain the implementation
+To run the offline and generated-package suites from the checkout root:
 
-`Joint.py` owns joint extraction. `Link.py` owns physical properties.
-`utils.py` owns canonical source selection and STL export. `Write.py` owns the
-pure self-contained package writer. UI and native verification share
-`export_design`, while offline fixtures can call the writer without importing
-Fusion. Verification dependencies stay in `tests` and `tools`.
+```bash
+python3 -m unittest discover -s tests -v
+python3 tools/verify_fusion_coverage.py --output artifacts/fusion-coverage
+bash tools/verify_docker.sh humble artifacts
+bash tools/verify_docker.sh jazzy artifacts
+```
 
-The [project verification skill](.opencode/skills/verify-fusion360tourdf/SKILL.md)
-records repeatable checks for later changes. Update the evidence and use-case
-matrix when inputs or export semantics change, not just the test count.
+The [testing guide](docs/testing.md) covers cross-tool loading, native fixtures, runtime checks, and cleanup. A passing offline suite is not native Fusion proof; `--require-complete` remains nonzero when full input coverage is unproven.
 
-`Example/Basic_Robot.f3d` is the upstream sample design. Its adjacent generated
-package is historical ROS 1 output, not the maintained ROS 2 reference.
-Re-export the design with this script for ROS 2.
+## Supported inputs and limits
+
+Use BRep solid assemblies with physical links and a connected mechanism. The maintained inputs include ordinary/as-built rigid, revolute, continuous, and slider joints; nested/repeated occurrences; root-owned bodies; and locked joints fixed at their current pose.
+
+Rigid groups and representable grounding relationships become fixed connections. Ground To Parent support is partial: unresolved bodyless/world frames fail rather than receiving guessed attachments.
+
+These input and fidelity gaps remain:
+
+- Motion-link conversion into affine mimic relations
+- Mesh-only input with a validated mass/inertia and export policy
+- General bodyless assembly or reference-frame endpoints
+- Active cylindrical, planar, pin-slot, and ball joint decomposition
+- Distinct materials or textures per body or face in combined STL output
+
+URDF describes a tree. A loop-closure sidecar records removed constraints but does not enforce closed-chain motion. ROS 1, SDF, MJCF, simulator backends, and other CAD systems are outside the maintained output scope.
+
+Consult the [input-support matrix](docs/fusion-coverage.md) for case-level status and the [pinned repository audit](docs/related-work.md) for the source comparisons behind the test cases.
+
+## Documentation
+
+Choose the guide for your next task:
+
+- [Model requirements](DESIGN_RULES.md): assembly, frames, and output invariants
+- [Assembly and export guide](docs/exporting.md): root selection, physical properties, configuration, and troubleshooting
+- [Native demo workflow](docs/demo-workflow.md): create, verify, and photograph a real Fusion model
+- [Testing guide](docs/testing.md): offline, loader, Blender, Docker, and native recipes
+- [Verification results](docs/verification-results.md): executed evidence and remaining limits
+
+`Example/Basic_Robot.f3d` is the inherited sample. Its adjacent ROS 1 package is historical output; re-export the design for ROS 2.
 
 ## License and attribution
 
-MIT. Original exporter by Toshinori Kitamura and contributors. See
-[LICENSE](LICENSE), [CHANGELOG.md](CHANGELOG.md), and the
-[source-cited related-work audit](docs/related-work.md). The audit identifies
-use cases and tradeoffs. It does not establish that this converter is better
-than every other exporter on every Fusion model.
+MIT. This project is a fork of [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf), originally authored by Toshinori Kitamura and contributors. See [LICENSE](LICENSE) and [CHANGELOG.md](CHANGELOG.md).

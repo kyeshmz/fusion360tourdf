@@ -8,6 +8,7 @@ The user checks the generated model in xacro, urdfdom, yourdfpy, and Blender.
 - Check fixed, revolute, continuous, and prismatic poses against literal expectations.
 - Reject wrong axes, shifted meshes, and missing resources.
 - Preserve an inspectable Blender scene and numeric reports.
+- Render checked zero/moved poses for the README without changing the input scene on disk.
 
 ## How to get to it (user POV)
 
@@ -26,6 +27,10 @@ bash tools/verify_cross_tools.sh "$run" 2>&1 | tee "$run/cross-tools.log"
 Inspect `loaders.json` and each variant's `blender.json`. Require zero and moved
 pose results for articulated and box variants and a zero pose for the fixed
 variant. Confirm all three `inspection.blend` files survive the run.
+
+`tools/verify_export.py` also runs `tools/render_readme.py` against the checked inspection scene.
+Inspect the PNGs visually and retain `images/images.json`; renders are illustrations, not substitutes
+for the loader/Blender assertions. See the [README image recipe](../../../../docs/demo-workflow.md#refresh-the-readme-pictures).
 
 ## Gotchas
 

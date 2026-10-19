@@ -1,0 +1,40 @@
+{
+  "inspection_sha256": "6ab4cb5dd16d8b8da9ccb95fdfab1b5c32ff95699cce7c46d84a2c24ad4bb1ed",
+  "expected_sha256": "8e525b86e99d7185dd16891e1d2010cbf843dfc5a163158e4f30d5f9f3055101",
+  "script_sha256": "db7b7122829d82a8f87de723a9198d7aaf8b70c4d9e86bbc3f5c8e3ff072c1bb",
+  "renderer": "5.2.2 LTS",
+  "shading": "neutral-preview",
+  "width": 1280,
+  "height": 960,
+  "images": {
+    "zero": {
+      "path": "rotary-slide-zero.png",
+      "positions": {
+        "turn": 0.0,
+        "boom_1_extend": 0.0
+      },
+      "sha256": "2a87d342e526f8c2a31f945ea543cc65d0593c55e21b4d155a3b6c7cb03dbfe9"
+    },
+    "moved": {
+      "path": "rotary-slide-moved.png",
+      "positions": {
+        "turn": 0.7853981633974483,
+        "boom_1_extend": 0.025
+      },
+      "sha256": "3f1e5b01072aed7f993b68bbd7ad53d254ea5fa83ccf24acc6d6c45b75972b75"
+    },
+    "fusion": {
+      "path": "rotary-slide-fusion.png",
+      "width": 1280,
+      "height": 960,
+      "sha256": "2298ee60f9f1879e3a91c6c7dadd642eeb9a5a10e02344567cfde5d951407c17",
+      "native_receipt_sha256": "94a628eaab4cc7412cd1d94abf2eb9cbbf11e1289e7f7ac55d5720e9d5406597",
+      "fusion_version": "2705.1.30",
+      "source_preservation": {
+        "status": "pass",
+        "numeric_absolute_tolerance": 1e-10
+      }
+    }
+  },
+  "native_receipt_sha256": "94a628eaab4cc7412cd1d94abf2eb9cbbf11e1289e7f7ac55d5720e9d5406597"
+}

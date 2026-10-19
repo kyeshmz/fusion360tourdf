@@ -1,6 +1,7 @@
 """Verify installed packages using real ROS launches, controllers, feedback, and TF."""
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -13,7 +14,8 @@ import time
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.fixtures import TARGET, VARIANTS, oracle
+from tests.fixtures import VARIANTS, oracle
+from tools.export_bundle import read_bundle
 from tools.verify_loaders import check_urdfdom, expand, mesh_path
 
 
@@ -54,18 +56,22 @@ def stop_launch(process):
     raise RuntimeError('Could not stop ROS launch process group ' + str(process.pid))
 
 
-def check_installed(package, robot_name, output):
+def check_installed(package, robot_name, output, *, source=None):
     from ros2launch.api import get_share_file_path_from_package
 
-    for relative in ('package.xml', 'viewers/display.launch.py',
-                     'viewers/display.rviz', 'config/robot_data.yaml'):
+    viewers = ('viewers/display.launch.py', 'viewers/display.rviz')
+    other_viewers = ('launch/display.launch.py', 'config/display.rviz')
+    if source is not None and (source / other_viewers[0]).is_file():
+        viewers, other_viewers = other_viewers, viewers
+    for relative in ('package.xml', *viewers, 'config/robot_data.yaml'):
         assert (package / relative).is_file(), 'Missing installed asset ' + relative
-    for relative in ('launch/display.launch.py', 'config/display.rviz'):
-        assert not (package / relative).exists(), 'Legacy installed viewer asset ' + relative
-    for name in ('display.launch.py', 'display.rviz'):
-        assert list(package.rglob(name)) == [package / 'viewers' / name], 'Duplicate viewer asset ' + name
+    for relative in other_viewers:
+        assert not (package / relative).exists(), 'Unexpected installed viewer asset ' + relative
+    for relative in viewers:
+        name = Path(relative).name
+        assert list(package.rglob(name)) == [package / relative], 'Duplicate viewer asset ' + name
     display = get_share_file_path_from_package(package_name=package.name, file_name='display.launch.py')
-    assert Path(display).resolve() == (package / 'viewers/display.launch.py').resolve(), display
+    assert Path(display).resolve() == (package / viewers[0]).resolve(), display
     urdf = expand(package, output / (robot_name + '.urdf'))
     check_urdfdom(urdf, output / (robot_name + '-urdfdom.log'))
     root = ET.parse(urdf).getroot()
@@ -187,9 +193,12 @@ def verify_launch(package_name, mode, expected, output, timeout):
                                       '/joint_trajectory_controller/follow_joint_trajectory')
                 wait_for(action.server_is_ready, 'trajectory action server')
                 goal = FollowJointTrajectory.Goal()
-                goal.trajectory.joint_names = list(TARGET)
+                targets = expected['moved']['positions']
+                assert targets and all(math.isfinite(value) for value in targets.values()) and any(
+                    value != 0 for value in targets.values()), 'Control verification requires a finite nonzero trajectory'
+                goal.trajectory.joint_names = list(targets)
                 point = JointTrajectoryPoint()
-                point.positions = list(TARGET.values())
+                point.positions = list(targets.values())
                 point.time_from_start.sec = 3
                 goal.trajectory.points = [point]
                 issued = time.monotonic()
@@ -221,6 +230,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--install', type=Path, required=True)
     parser.add_argument('--timeout', type=float, default=45)
+    parser.add_argument('--bundle', type=Path, help='Verify this actual native Fusion export instead of fixtures')
     args = parser.parse_args()
     assert args.timeout > 0
     from ament_index_python.packages import get_package_share_directory
@@ -231,21 +241,38 @@ def main():
     report = {'ros_distro': os.environ.get('ROS_DISTRO'),
               'rmw_implementation': get_rmw_implementation_identifier(),
               'python_version': sys.version.split()[0], 'packages': {}}
+    if args.bundle:
+        source, expected = read_bundle(args.bundle)
+        cases = [(source.name[:-len('_description')], expected, True, source)]
+        report['evidence_kind'] = 'installed-native-fusion-export'
+    else:
+        cases = [('fixture_' + variant, oracle(variant == 'fixed'), variant == 'articulated', None)
+                 for variant in VARIANTS]
+        report['evidence_kind'] = 'generated-fixtures'
     rclpy.init()
     try:
-        for variant in VARIANTS:
-            robot_name = 'fixture_' + variant
+        for robot_name, expected, control, source in cases:
             package_name = robot_name + '_description'
             package = Path(get_package_share_directory(package_name)).resolve()
             assert package.is_relative_to(args.install.resolve()), 'Launch resolved the source package'
-            report['packages'][variant] = {'install_share': str(package),
-                                          'meshes': check_installed(package, robot_name, args.output)}
-            expected = oracle(variant == 'fixed')
-            report['packages'][variant]['display'] = verify_launch(
+            case = {'install_share': str(package),
+                    'meshes': check_installed(package, robot_name, args.output, source=source)}
+            report['packages'][robot_name if source is not None else robot_name.removeprefix('fixture_')] = case
+            if source is not None:
+                hashes = {}
+                for path in source.rglob('*'):
+                    if not path.is_file() or path.name == 'CMakeLists.txt':
+                        continue
+                    relative = path.relative_to(source)
+                    digest = hashlib.sha256((package / relative).read_bytes()).hexdigest()
+                    assert digest == hashlib.sha256(path.read_bytes()).hexdigest(), 'Installed native asset changed: ' + str(relative)
+                    hashes[str(relative)] = digest
+                case['native_assets_sha256'] = hashes
+            case['display'] = verify_launch(
                 package_name, 'display', expected, args.output, args.timeout)
             (args.output / 'ros.json').write_text(json.dumps(report, indent=2) + '\n')
-            if variant == 'articulated':
-                report['packages'][variant]['control'] = verify_launch(
+            if control:
+                case['control'] = verify_launch(
                     package_name, 'control', expected, args.output, args.timeout)
             (args.output / 'ros.json').write_text(json.dumps(report, indent=2) + '\n')
     finally:
