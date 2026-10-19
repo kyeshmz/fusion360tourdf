@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="rotary_slide_boom_1_carriage_1_sensor_2">
+  <link name="boom_1_carriage_1_sensor_2">
+    <inertial>
+      <origin xyz="-2.449293598294706e-18 0.039999999999999994 0.02899999999999997" rpy="0 0 0" />
+      <mass value="0.08831249999999999" />
+      <inertia ixx="6.984046875000219e-06" iyy="6.984046875000219e-06" izz="9.19921874999955e-06" ixy="2.168404344971009e-19" iyz="4.336808689942018e-19" ixz="4.3368086899420173e-19" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1_sensor_2.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="boom_1_carriage_1_sensor_2_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1_sensor_2.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

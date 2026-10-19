@@ -1,0 +1,187 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="rotary_slide">
+  <link name="mast_1">
+    <inertial>
+      <origin xyz="0 0 -0.10999999999999999" rpy="0 0 0" />
+      <mass value="3.4539999999999997" />
+      <inertia ixx="0.014650716666666667" iyy="0.014391666666666636" izz="0.0011801166666666613" ixy="0" iyz="0" ixz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0.07 0 -0.24" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/mast_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="mast_1_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.07 0 -0.24" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/mast_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="boom_1_carriage_1_sensor_1">
+    <inertial>
+      <origin xyz="2.4492935982947068e-18 -0.04000000000000001 0.02899999999999997" rpy="0 0 0" />
+      <mass value="0.08831249999999999" />
+      <inertia ixx="6.9840468750019535e-06" iyy="6.984046875000219e-06" izz="9.199218749999767e-06" ixy="1.062646893143348e-34" iyz="2.655529440325959e-35" ixz="4.336808689942018e-19" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1_sensor_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="boom_1_carriage_1_sensor_1_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1_sensor_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="boom_1_carriage_1_sensor_2">
+    <inertial>
+      <origin xyz="-2.449293598294706e-18 0.039999999999999994 0.02899999999999997" rpy="0 0 0" />
+      <mass value="0.08831249999999999" />
+      <inertia ixx="6.984046875000219e-06" iyy="6.984046875000219e-06" izz="9.19921874999955e-06" ixy="2.168404344971009e-19" iyz="4.336808689942018e-19" ixz="4.3368086899420173e-19" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1_sensor_2.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="boom_1_carriage_1_sensor_2_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1_sensor_2.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="boom_1_carriage_1">
+    <inertial>
+      <origin xyz="-2.7755575615628914e-17 -1.387778780781446e-17 0.020000000000000018" rpy="0 0 0" />
+      <mass value="0.6908" />
+      <inertia ixx="0.00026624583333332424" iyy="0.00018421333333333567" izz="0.00026624583333333465" ixy="-8.623386960608514e-19" iyz="1.7347234759768075e-18" ixz="3.469446951953614e-18" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="boom_1_carriage_1_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="boom_1">
+    <inertial>
+      <origin xyz="0.07500000000000001 4.592425496802575e-18 0.015000000000000013" rpy="0 0 0" />
+      <mass value="1.2363750000000002" />
+      <inertia ixx="0.00019060781249999326" iyy="0.0034026070312500045" izz="0.0034644257812500006" ixy="6.706835098831035e-19" iyz="3.469446951953614e-18" ixz="-2.1244235522607673e-34" />
+    </inertial>
+    <visual>
+      <origin xyz="4.286263797015737e-18 -0.07 -0.24" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="boom_1_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="4.286263797015737e-18 -0.07 -0.24" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0.01" rpy="0 0 0" />
+      <mass value="6.782399999999999" />
+      <inertia ixx="0.01853856" iyy="0.0327816" izz="0.050868" ixy="0" iyz="0" ixz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/base_link.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="base_link_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/base_link.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rigid_attachment_mast_1" type="fixed">
+    <origin xyz="-0.07 0 0.24" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="mast_1" />
+  </joint>
+  <joint name="turn" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 1.5707963267948966" />
+    <parent link="mast_1" />
+    <child link="boom_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="100" velocity="100" lower="-1.0471975511965976" upper="1.5707963267948966" />
+  </joint>
+  <joint name="boom_1_extend" type="prismatic">
+    <origin xyz="0.14 8.572527594031473e-18 0.015000000000000013" rpy="0 0 0" />
+    <parent link="boom_1" />
+    <child link="boom_1_carriage_1" />
+    <axis xyz="1 0 0" />
+    <limit effort="100" velocity="100" lower="-0.02" upper="0.04" />
+  </joint>
+  <joint name="boom_1_carriage_1_sensor_mount_1" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="boom_1_carriage_1" />
+    <child link="boom_1_carriage_1_sensor_1" />
+  </joint>
+  <joint name="boom_1_carriage_1_sensor_mount_2" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="boom_1_carriage_1" />
+    <child link="boom_1_carriage_1_sensor_2" />
+  </joint>
+  <ros2_control name="rotary_slide_system" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="turn">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">0</param>
+      </state_interface>
+      <state_interface name="velocity">
+        <param name="initial_value">0</param>
+      </state_interface>
+    </joint>
+    <joint name="boom_1_extend">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">0</param>
+      </state_interface>
+      <state_interface name="velocity">
+        <param name="initial_value">0</param>
+      </state_interface>
+    </joint>
+  </ros2_control>
+</robot>

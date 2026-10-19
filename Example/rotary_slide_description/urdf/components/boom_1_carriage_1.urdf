@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="rotary_slide_boom_1_carriage_1">
+  <link name="boom_1_carriage_1">
+    <inertial>
+      <origin xyz="-2.7755575615628914e-17 -1.387778780781446e-17 0.020000000000000018" rpy="0 0 0" />
+      <mass value="0.6908" />
+      <inertia ixx="0.00026624583333332424" iyy="0.00018421333333333567" izz="0.00026624583333333465" ixy="-8.623386960608514e-19" iyz="1.7347234759768075e-18" ixz="3.469446951953614e-18" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="boom_1_carriage_1_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.14 -0.07000000000000002 -0.255" rpy="0 0 -1.5707963267948966" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/boom_1_carriage_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

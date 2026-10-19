@@ -1,5 +1,25 @@
 # Verification results
 
+## October 19, 2026: pulled installer/viewer changes and component showcase
+
+The macOS integration run fast-forwarded to `7bf5a13`, retained the shared `install.sh`/`install.cmd`/`tools/install_fusion.py` implementation, and combined its separate `viewers/` layout with plain assembly and six per-component URDF files. A recovery stash and external copy preserved the pending work during conflict resolution; the other contributor’s installer and portability checks were not replaced by the earlier duplicate prototype.
+
+Fresh native demo execution passed 449 assertions after explicitly reloading the changed pure writer. The source snapshots and retained entities remained unchanged. The earlier eleven-case cold-import run passed before the pull and is a different source snapshot, not certification of this merged tree.
+
+The actual merged-layout export passed independent loading, negative controls, Blender, Humble/Jazzy install-space checks, component urdfdom parsing, controller activation, trajectory feedback, and six-link transforms. Each of the six component files also loaded its shared visual/collision meshes independently. The expanded cross-tool suite passed seven loader integration tests and three Blender variants.
+
+Real RViz 2 GUI capture ran under Xvfb with software OpenGL on ROS 2 Jazzy/CycloneDDS. It recorded zero and commanded poses after feedback/transform checks and a successful mock-controller trajectory. Numbered labels and leader lines stayed locked to the matching URDF frames. The chaptered walkthrough combines those actual GUI frames with illustrated instructions, a tested demo goal command, and the optional single-file installer; it has no audio narration and is not a continuous recording of Fusion menu clicks. Its published receipt records duration, chapter timing, and hashes.
+
+The expanded offline suite ran 275 tests on both host CPython 3.11.11 and 3.13.2: 262 passed and 13 platform-specific cases were skipped in each run. Single-file installer regressions exercised execution away from the checkout, caller-relative paths, dry-run, update refusal, retained config/backups, license inclusion, and POSIX execution. Native Windows CMD/archive execution is configured in CI, not claimed as locally run. Python 3.12/3.14 hosted matrix jobs likewise require their own results.
+
+The same 275-test suite also passed with a read-only checkout mount in Docker Jazzy/Python 3.12: 263 passed and 12 platform-specific cases were skipped. This is local Linux evidence, not a hosted-job result. The archive returned exit code 1 under a separate Python 3.10.16 probe before payload extraction, correctly reporting its 3.11 minimum. The final 122.65-second, fourteen-chapter MP4 decoded fully and its instruction cards/labeled screenshots were visually reviewed.
+
+The license audit checked the actual license files at all nine pinned source revisions. Seven distinct MIT texts are retained; repeated upstream notices share one copy. EOF newlines were normalized in two files without altering their copyright/permission/disclaimer text. Notices distinguish inherited/adapted guidance from comparison-only sources and travel with installed exporter files and the `.pyz`.
+
+The ready example is [the native package and component catalog](../Example/rotary_slide_README.md). Published media, raw source-window captures, source recording, and hash receipts live under [`docs/media`](media/README.md). The combined-version source-credit ledger is [changelog.md](../changelog.md).
+
+Detailed run receipts remain at `/private/var/folders/q6/tz5lqjtn66q2cw4jg9qtfcj00000gn/T/opencode/fusion360tourdf-showcase-qawpBv/`: `rotary-slide-5m5j8l7c/native.json`, `merged-e2e/export-e2e-_zlqdr1r/summary.json`, `merged-gui/rviz-v6gbkW/capture/rviz.json`, `component-loaders.json`, `cross-tools.log`, `offline-publish-311.log`, `offline-publish-313.log`, `offline-publish-312-docker.log`, and `single-file-proof.json`. These receipts identify dirty source snapshots; they do not establish universal Fusion coverage, real-hardware operation, or a native Windows installer pass.
+
 ## October 19, 2026: installer/native-workflow integration
 
 The publication merge combines installer/viewer work from `d54d4c9` with the

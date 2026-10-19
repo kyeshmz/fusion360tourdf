@@ -34,6 +34,11 @@ the third argument to `tools/verify_docker.sh`. Use `tools/verify_export.py BUND
 for the complete loader, Blender, and both-distribution recipe. Require
 `evidence_kind: installed-native-fusion-export` and installed native-asset hashes in each ROS report.
 
+For real GUI media, run `bash tools/capture_ros.sh NATIVE_BUNDLE OUTPUT`. Require the same
+controller/feedback/TF checks before zero/moved RViz screenshots, frame-locked component labels,
+and the trajectory recording. See [the showcase recipe](../../../../docs/showcase.md).
+Do not substitute Blender previews for ROS/RViz captures or label mock control as physics.
+
 ## Gotchas
 
 The image explicitly selects CycloneDDS. A pass does not certify other RMW

@@ -10,6 +10,17 @@ from tools.verify_loaders import check_urdfdom, expand, load_and_check, mesh_pat
 
 
 class LoaderIntegrationTest(unittest.TestCase):
+    def test_component_urdfs_load_their_shared_meshes_independently(self):
+        package = generate_fixture(self.output / 'components')
+        assembly = ET.parse(package / 'urdf/fixture_articulated.urdf').getroot()
+        for link in assembly.findall('link'):
+            name = link.get('name')
+            component = package / 'urdf/components' / (name + '.urdf')
+            check_urdfdom(component, self.output / (name + '-component-urdfdom.log'))
+            report = load_and_check(component, package)
+            self.assertEqual(set(report['zero']['visual']), {name})
+            self.assertEqual(set(report['zero']['collision']), {name})
+
     @classmethod
     def setUpClass(cls):
         base = os.environ.get('VERIFY_OUTPUT') or os.environ.get('TMPDIR')

@@ -77,7 +77,9 @@ class PackageTest(unittest.TestCase):
         self.assertEqual(requests, [{'base_link': 'base_link.stl',
                                      'arm_1': 'arm_1.stl', 'tool': 'tool.stl'}])
         self.assertEqual({str(p.relative_to(result)) for p in result.rglob('*') if p.is_file()}, {
-            'urdf/bot.xacro', 'meshes/base_link.stl', 'meshes/arm_1.stl', 'meshes/tool.stl',
+            'urdf/bot.xacro', 'urdf/bot.urdf', 'urdf/components/base_link.urdf',
+            'urdf/components/arm_1.urdf', 'urdf/components/tool.urdf',
+            'meshes/base_link.stl', 'meshes/arm_1.stl', 'meshes/tool.stl',
             'viewers/display.launch.py', 'launch/control.launch.py', 'viewers/display.rviz',
             'config/controllers.yaml', 'config/robot_data.yaml', 'package.xml', 'CMakeLists.txt',
         })
@@ -119,6 +121,29 @@ class PackageTest(unittest.TestCase):
         self.assertNotIn('joint_state_publisher', control)
         self.assertIn("('~/robot_description', '/robot_description')", control)
         self.assertIn("('robot_description', '/robot_description')", control)
+
+    def test_plain_and_component_urdfs_preserve_link_data_and_shared_meshes(self):
+        result = self.export()
+        self.assertEqual((result / 'urdf/bot.urdf').read_bytes(), (result / 'urdf/bot.xacro').read_bytes())
+        robot = ET.parse(result / 'urdf/bot.urdf').getroot()
+        sidecar = json.loads((result / 'config/robot_data.yaml').read_text())
+        self.assertEqual(sidecar['urdf'], 'urdf/bot.urdf')
+        self.assertEqual(sidecar['component_urdfs'], {
+            link.get('name'): 'urdf/components/' + link.get('name') + '.urdf' for link in robot.findall('link')})
+        for link in robot.findall('link'):
+            component = ET.parse(result / 'urdf/components' / (link.get('name') + '.urdf')).getroot()
+            self.assertEqual(component.tag, 'robot')
+            self.assertEqual(len(component.findall('link')), 1)
+            self.assertFalse(component.findall('joint'))
+            self.assertIsNone(component.find('ros2_control'))
+            actual = component.find('link')
+            for element in (link, actual):
+                for node in element.iter():
+                    node.text = node.tail = None
+            self.assertEqual(ET.tostring(actual), ET.tostring(link))
+            for mesh in actual.findall('.//mesh'):
+                relative = mesh.get('filename').split('package://bot_description/')[1]
+                self.assertTrue((result / relative).is_file())
 
     def test_frames_com_inertia_and_axes_against_literals(self):
         result = self.export()

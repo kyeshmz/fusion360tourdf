@@ -104,7 +104,10 @@ def install(source, scripts_dir, *, update=False, dry_run=False):
     if scripts.exists() and not scripts.is_dir():
         raise ValueError('Expected a Scripts directory: %s' % scripts)
     source_contents = _contents(source)
-    for name in ('URDF_Exporter.py', 'URDF_Exporter.manifest', 'LICENSE', 'xacro_export.template.toml',
+    for name in ('URDF_Exporter.py', 'URDF_Exporter.manifest', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+                 'licenses/fusion2urdf-MIT.txt', 'licenses/Adriaeik-MIT.txt', 'licenses/ACDC4Robot-MIT.txt',
+                 'licenses/dheena2k2-MIT.txt', 'licenses/cadop-MIT.txt', 'licenses/runtimerobotics-MIT.txt',
+                 'licenses/david-dorf-MIT.txt', 'xacro_export.template.toml',
                  'core/__init__.py', 'core/Write.py', 'core/Joint.py', 'core/Link.py', 'utils/__init__.py',
                  'utils/config.py', 'utils/utils.py', 'utils/stl.py', 'utils/transforms.py',
                  'utils/materials.py', 'utils/validate.py'):

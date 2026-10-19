@@ -1,0 +1,11 @@
+{
+  "trajectory": {
+    "joint_names": ["turn", "boom_1_extend"],
+    "points": [
+      {
+        "positions": [0.7853981633974483, 0.025],
+        "time_from_start": {"sec": 3}
+      }
+    ]
+  }
+}

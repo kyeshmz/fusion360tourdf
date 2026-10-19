@@ -63,7 +63,7 @@ adding a TOML dependency to the exporter.
 The installer and viewer archive checks run without Fusion or ROS:
 
 ```bash
-	python3 -m unittest tests.test_install_fusion tests.test_install_launchers tests.test_viewer_archive -v
+	python3 -m unittest tests.test_install_fusion tests.test_install_launchers tests.test_installer_archive tests.test_license_notices tests.test_viewer_archive -v
 ```
 
 Installer tests use temporary Scripts folders. They do not replace a real
@@ -75,6 +75,13 @@ failure exit codes. Interpreter checks cover Python 3.11+ selection and disabled
 automatic runtime downloads. Bash PATH stand-ins also check argument boundaries
 and one backend dispatch after probing. On Windows, the missing-interpreter
 test can skip if a runtime remains discoverable outside its isolated PATH.
+
+Archive tests build an executable `.pyz` and run it away from the checkout. They
+exercise dry-run, caller-relative paths, the shared update/backup policy, license
+inclusion, and exclusion of private TOML/caches. Missing required third-party
+notices reject installation. License-text checks compare retained copies with
+the pinned upstream text hashes; source relationships remain explicit in the
+[license index](../LICENSES.md).
 
 On POSIX, also check Bash syntax:
 

@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="rotary_slide_mast_1">
+  <link name="mast_1">
+    <inertial>
+      <origin xyz="0 0 -0.10999999999999999" rpy="0 0 0" />
+      <mass value="3.4539999999999997" />
+      <inertia ixx="0.014650716666666667" iyy="0.014391666666666636" izz="0.0011801166666666613" ixy="0" iyz="0" ixz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0.07 0 -0.24" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/mast_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+      <material name="mast_1_material">
+        <color rgba="0.6235294117647059 0.6235294117647059 0.6235294117647059 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.07 0 -0.24" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://rotary_slide_description/meshes/mast_1.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </collision>
+  </link>
+</robot>

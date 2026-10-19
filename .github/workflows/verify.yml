@@ -9,17 +9,21 @@ permissions:
 jobs:
   offline:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
       - run: python tools/verify_fusion_coverage.py --output artifacts/fusion-coverage
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fusion-offline-coverage
+          name: fusion-offline-coverage-${{ matrix.python }}
           path: artifacts
 
   installer:
@@ -33,7 +37,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m unittest tests.test_install_fusion tests.test_install_launchers -v
+      - run: python -m unittest tests.test_install_fusion tests.test_install_launchers tests.test_installer_archive tests.test_license_notices -v
+      - run: python tools/build_installer.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: artifacts/fusion360tourdf-install.pyz
 
   cross-tools:
     runs-on: ubuntu-24.04

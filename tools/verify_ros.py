@@ -86,6 +86,16 @@ def check_installed(package, robot_name, output, *, source=None):
         assert not list(package.rglob('control.launch.py')), 'Fixed package has a control launch'
         assert not list(package.rglob('controllers.yaml')), 'Fixed package has controller configuration'
     assert not root.findall('collision'), 'Root-level collision'
+    plain = package / 'urdf' / (robot_name + '.urdf')
+    if plain.exists():
+        canonical = lambda element: ET.canonicalize(ET.tostring(element, encoding='unicode'), strip_text=True)
+        assert canonical(ET.parse(plain).getroot()) == canonical(root), 'Plain URDF differs from expanded xacro'
+        for link in root.findall('link'):
+            component = package / 'urdf/components' / (link.get('name') + '.urdf')
+            check_urdfdom(component, output / (robot_name + '-' + link.get('name') + '-urdfdom.log'))
+            part = ET.parse(component).getroot()
+            assert len(part.findall('link')) == 1 and not part.findall('joint') and part.find('ros2_control') is None
+            assert canonical(part.find('link')) == canonical(link), 'Component link data changed'
     meshes = set()
     for link in root.findall('link'):
         assert link.findall('visual') and link.findall('collision'), 'Missing installed geometry'
@@ -103,7 +113,7 @@ def check_installed(package, robot_name, output, *, source=None):
     return sorted(meshes)
 
 
-def verify_launch(package_name, mode, expected, output, timeout):
+def verify_launch(package_name, mode, expected, output, timeout, *, on_pose=None):
     try:
         import rclpy
         from action_msgs.msg import GoalStatus
@@ -188,6 +198,8 @@ def verify_launch(package_name, mode, expected, output, timeout):
                         raise TimeoutError('Controllers did not become active: ' + str(states))
                 node.destroy_client(client)
             report['zero'] = wait_for(lambda: observed_pose(expected['zero']), 'zero joint_states and TF')
+            if on_pose is not None:
+                on_pose('zero', report['zero'])
             if mode == 'control':
                 action = ActionClient(node, FollowJointTrajectory,
                                       '/joint_trajectory_controller/follow_joint_trajectory')
@@ -214,6 +226,8 @@ def verify_launch(package_name, mode, expected, output, timeout):
                 report['action_error_code'] = result.result.error_code
                 report['moved'] = wait_for(lambda: observed_pose(expected['moved'], issued),
                                           'commanded joint_states and numeric TF')
+                if on_pose is not None:
+                    on_pose('moved', report['moved'])
         finally:
             if action is not None:
                 action.destroy()

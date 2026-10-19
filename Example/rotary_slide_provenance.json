@@ -1,0 +1,34 @@
+{
+  "evidence_kind": "native-fusion-export",
+  "fusion_version": "2705.1.30",
+  "native_receipt_sha256": "da4ed8b7042da10ec7d5ef37d2f5bbbee60998987cb943b23b0dbcbabb2eb2e1",
+  "source_git": {
+    "status": "available",
+    "revision": "7bf5a13b274e1367e77fe3053c5bf7b5eee1b936",
+    "dirty": true,
+    "porcelain": "D  CHANGELOG.md\nM  README.md\nM  URDF_Exporter/core/Write.py\nA  changelog.md\nM  tests/test_package.py\n M tests/test_viewer_archive.py\nM  tools/Dockerfile.ros\nM  tools/verify_ros.py\n?? CONTRIBUTING.md\n?? Example/rotary_slide_description/CMakeLists.txt\n?? Example/rotary_slide_description/config/controllers.yaml\n?? Example/rotary_slide_description/config/display.rviz\n?? Example/rotary_slide_description/config/robot_data.yaml\n?? Example/rotary_slide_description/launch/control.launch.py\n?? Example/rotary_slide_description/launch/display.launch.py\n?? Example/rotary_slide_description/meshes/base_link.stl\n?? Example/rotary_slide_description/meshes/boom_1.stl\n?? Example/rotary_slide_description/meshes/boom_1_carriage_1.stl\n?? Example/rotary_slide_description/meshes/boom_1_carriage_1_sensor_1.stl\n?? Example/rotary_slide_description/meshes/boom_1_carriage_1_sensor_2.stl\n?? Example/rotary_slide_description/meshes/mast_1.stl\n?? Example/rotary_slide_description/package.xml\n?? Example/rotary_slide_description/urdf/components/base_link.urdf\n?? Example/rotary_slide_description/urdf/components/boom_1.urdf\n?? Example/rotary_slide_description/urdf/components/boom_1_carriage_1.urdf\n?? Example/rotary_slide_description/urdf/components/boom_1_carriage_1_sensor_1.urdf\n?? Example/rotary_slide_description/urdf/components/boom_1_carriage_1_sensor_2.urdf\n?? Example/rotary_slide_description/urdf/components/mast_1.urdf\n?? Example/rotary_slide_description/urdf/rotary_slide.urdf\n?? Example/rotary_slide_description/urdf/rotary_slide.xacro\n?? requirements-media.txt\n?? tools/capture_ros.sh\n?? tools/capture_rviz.py\n?? tools/make_walkthrough.py"
+  },
+  "files_sha256": {
+    "CMakeLists.txt": "2512cb93e0a66bbbd04eb16f12640bea268af12f0a6973983fdbf7a416593c41",
+    "package.xml": "f53a1b8cbbb360d0e39cc81395c690816f37e9287f266ad9b0dcaa2ae0fd0e23",
+    "config/controllers.yaml": "70128c4c300ab35b1f917fd6478c7de43b5cb064c57344541d5bcfe15a0067bd",
+    "config/robot_data.yaml": "aeec2019e352b17455d8e4bf01983a4941c0e567cce3f4474cde7a8bc27be5ee",
+    "urdf/rotary_slide.xacro": "b4646febed7fff64e83e93f88e0acb0fedcf416f257345995e472acac112d229",
+    "urdf/rotary_slide.urdf": "b4646febed7fff64e83e93f88e0acb0fedcf416f257345995e472acac112d229",
+    "urdf/components/base_link.urdf": "15f453d88f0a8e85e0b46939fa3f915c6745c3d8fffaa5588358b0aa154adaca",
+    "urdf/components/boom_1_carriage_1.urdf": "caac353ad02df00915f09c1a84759070976c34b2394425b925e9610de17b0969",
+    "urdf/components/boom_1_carriage_1_sensor_1.urdf": "0e2a1600c2bfef14438af13ed4ab994f74b765b281ff4b0fe8f4bfe913fce906",
+    "urdf/components/mast_1.urdf": "55b18646c39be92744ab5409024dac8b8252de34193aa1424c2996a5c3ec72ca",
+    "urdf/components/boom_1.urdf": "27832b4a81c2addb57c503f886af98937a6c1fea8ee57caafcb7122e8225ea6e",
+    "urdf/components/boom_1_carriage_1_sensor_2.urdf": "f62188a08ef39eb1340e7f2d6a1bb527b20f6c84ee2111d49b7244523088cc67",
+    "launch/control.launch.py": "4dfe43ea6b4e626700b9fde8efe9825e00a0f04261e128a28bbac395e31d2904",
+    "meshes/boom_1_carriage_1.stl": "1540ba8d5b5e3f75d23c849da9a55b323b37a1e19e22ffd10719e878168e1c6c",
+    "meshes/mast_1.stl": "e2e1492b163c157582c168de9f015e970e1630eafec1b056d22fce4e22708d12",
+    "meshes/boom_1_carriage_1_sensor_1.stl": "f754de737df43df17dee0caebcb168545aab746ddf73f17f48dd306ee1157af7",
+    "meshes/boom_1_carriage_1_sensor_2.stl": "9401788ffe8e43e113279c5a3866842cead66d84b6e269bd05810bea3d29bcae",
+    "meshes/boom_1.stl": "b19b73f9cc5da77a776839489d9afcd8def480746143ab261cc72902ef27d7d5",
+    "meshes/base_link.stl": "0d5fd5c8871251f459de2bf2355e7a7dbc4249555a832adb6463c6b792d9d006",
+    "viewers/display.launch.py": "f1b67f19f37a3bf09dbfa51ffe7884fb34998027d28f5b336bd16eeabca2659f",
+    "viewers/display.rviz": "47603e89194b3bdb29d31ab66c5cbaf403ca821c64c2696bc38709354dc62ce8"
+  }
+}

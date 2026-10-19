@@ -1,10 +1,39 @@
 # fusion360tourdf
 
-Export Autodesk Fusion assemblies as ROS 2 robot description packages, including STL meshes, joints, mass, and inertia. The exporter runs inside Fusion without third-party Python dependencies and preserves the source design’s editable history.
+[![Verify exports](https://github.com/kyeshmz/fusion360tourdf/actions/workflows/verify.yml/badge.svg)](https://github.com/kyeshmz/fusion360tourdf/actions/workflows/verify.yml)
+[![Python tools: 3.11+](https://img.shields.io/badge/Python_tools-3.11%2B-3776AB?logo=python&logoColor=white)](#requirements)
+[![Fusion Python tested: 3.14.0](https://img.shields.io/badge/Fusion_Python-tested_3.14.0-3776AB?logo=python&logoColor=white)](docs/verification-results.md)
+[![ROS 2: Humble and Jazzy](https://img.shields.io/badge/ROS_2-Humble_%7C_Jazzy-22314E?logo=ros&logoColor=white)](#use-the-package-in-ros-2)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSES.md)
 
-Generated packages target **ROS 2 Humble and Jazzy**. Launch them in RViz or use mock ros2_control hardware to command joints and inspect their feedback.
+Export Autodesk Fusion assemblies to ROS 2: meshes, joints, mass, inertia, and ready-to-build robot description packages. Get a complete robot URDF **and a separate URDF for every link**, with RViz viewers and optional mock joint control.
 
-[Install and export](#install-and-export) · [Use in ROS 2](#use-the-package-in-ros-2) · [Reproduce the demo](#reproduce-the-verified-demo) · [Configuration](#configure-the-export) · [Support and limits](#supported-inputs-and-limits)
+The dependency-free exporter runs **inside Fusion** and preserves the source design's editable history. Terminal installers place its files; they do not perform headless CAD export. Generated packages target **ROS 2 Humble and Jazzy**.
+
+This is an integration fork of [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf), not a from-scratch exporter. [Source credits and licenses](LICENSES.md) and the [combined-version changelog](changelog.md) distinguish inherited code, adapted ideas, comparison references, and work developed here.
+
+[Quick start](#quick-start) · [Requirements](#requirements) · [Component files](#ready-to-use-demo-urdfs) · [CLI](#command-line-integration) · [ROS 2](#use-the-package-in-ros-2) · [Limits](#supported-inputs-and-limits) · [Contributing](CONTRIBUTING.md)
+
+## Quick start
+
+Install host **Python 3.11+**, then clone the repository or download and extract its ZIP:
+
+```bash
+git clone https://github.com/kyeshmz/fusion360tourdf.git
+cd fusion360tourdf
+```
+
+Run the one-line installer for your platform:
+
+| macOS terminal | Windows PowerShell or Command Prompt |
+| --- | --- |
+| `bash install.sh` | `.\install.cmd` |
+
+1. In Fusion, keep **Capture Design History enabled**. Use connected solid components with materials and joint limits; choose `base_link` or configure the root.
+2. Open **Utilities > Add-ins > Scripts and Add-ins > Scripts**, select **URDF_Exporter**, and choose **Run**. If it is absent, add the installed folder printed by the installer.
+3. Choose a fresh output parent. Copy the generated `your_robot_description` package to your ROS workspace's `src` folder and [build/launch it](#use-the-package-in-ros-2).
+
+Nothing is exported by the installer, and existing robot packages are never overwritten. To inspect installation first, append `--dry-run`. To update a changed installation, close Fusion and use `--update`; local configuration and a backup are retained. [Custom paths, recovery, and manual installation](docs/installation.md).
 
 ## Example: Fusion to URDF
 
@@ -16,15 +45,39 @@ The six-link rotary-slide demo includes a grounded mast, a revolute joint, a nes
 
 The Blender pictures use the actual exported meshes with neutral preview shading. The moved pose rotates 45 degrees and extends 25 mm; it does not simulate physics. [Reproduce the model and pictures](docs/demo-workflow.md).
 
+## Walkthrough and real ROS views
+
+[![Fusion-to-URDF walkthrough poster](docs/media/walkthrough-poster.png)](docs/media/walkthrough.mp4)
+
+[Download the walkthrough (MP4)](docs/media/walkthrough.mp4) or read the [chapter transcript](docs/media/walkthrough.md). The movie combines illustrated installation/export instructions with actual RViz joint-motion footage; it is not a continuous recording of Fusion menu clicks and has no audio narration.
+
+| Real ROS 2 Jazzy / RViz 2: zero pose | Real ROS 2 Jazzy / RViz 2: commanded pose |
+| --- | --- |
+| ![Real RViz capture with numbered URDF component labels at joint zero](docs/media/ros-jazzy-zero.png) | ![Real RViz capture after verified 45-degree rotation and 25 mm slider extension](docs/media/ros-jazzy-moved.png) |
+
+These views use the installed native package and verified mock-controller feedback, not Blender previews. Numbered text/leader lines are presentation markers attached to the corresponding URDF frames; the filename legends match the component catalog. This is mock hardware, not physical-hardware or dynamics evidence.
+
+![Actual recorded RViz mock-controller joint motion](docs/media/rviz-motion.gif)
+
+The [showcase guide](docs/showcase.md) explains how to capture and rebuild the labeled media from a fresh native export.
+
 ## What you get
 
 Each export creates a self-contained ROS 2 description package:
+
+- Complete `.urdf` and self-contained `.xacro`, plus one-link component URDFs sharing the package meshes.
+- Binary STL visual/collision geometry, SI-unit mass/inertia, joint frames, axes, and limits.
+- Nested and repeated instances with distinct identities; supported fixed, rotary, and slider connections.
+- Display/RViz assets under `viewers/`; mock ros2_control launch/configuration for movable robots.
+- Transactional publication and a topology/warning sidecar, without changing the source assembly.
 
 ```text
 your_robot_description/
 ├── package.xml
 ├── CMakeLists.txt
 ├── urdf/your_robot.xacro
+├── urdf/your_robot.urdf
+├── urdf/components/*.urdf
 ├── meshes/*.stl
 ├── viewers/
 │   ├── display.launch.py
@@ -36,6 +89,24 @@ your_robot_description/
 ```
 
 Movable robots include the control launch file and controller configuration. Fixed-only robots omit those assets. `robot_data.yaml` records the topology, warnings, and any removed loop-closing constraints; its JSON formatting is valid YAML.
+
+The plain `.urdf` describes the complete robot. Each component file contains one link with the same visual, collision, and inertial data, but no joints or controllers. Component files reuse the package’s meshes; copy or install the complete package, not an isolated XML file.
+
+### Ready-to-use demo URDFs
+
+The [native example package](Example/rotary_slide_description/) includes the full assembly and every labeled component. Download or clone the complete package so its mesh resources remain available:
+
+| Label | Component | URDF file |
+| --- | --- | --- |
+| All | Complete assembly | [rotary_slide.urdf](Example/rotary_slide_description/urdf/rotary_slide.urdf) |
+| 1 | Base | [base_link.urdf](Example/rotary_slide_description/urdf/components/base_link.urdf) |
+| 2 | Mast | [mast_1.urdf](Example/rotary_slide_description/urdf/components/mast_1.urdf) |
+| 3 | Rail | [boom_1.urdf](Example/rotary_slide_description/urdf/components/boom_1.urdf) |
+| 4 | Carriage | [boom_1_carriage_1.urdf](Example/rotary_slide_description/urdf/components/boom_1_carriage_1.urdf) |
+| 5 | Sensor 1 | [boom_1_carriage_1_sensor_1.urdf](Example/rotary_slide_description/urdf/components/boom_1_carriage_1_sensor_1.urdf) |
+| 6 | Sensor 2 | [boom_1_carriage_1_sensor_2.urdf](Example/rotary_slide_description/urdf/components/boom_1_carriage_1_sensor_2.urdf) |
+
+See the [example notes](Example/rotary_slide_README.md) for shared meshes and local-frame semantics. The package was regenerated after pulling the installer/viewer contribution; it retains the separate `viewers/` layout.
 
 ### Archive the package or viewers
 
@@ -50,8 +121,8 @@ From the export's parent directory, create either archive with Python's
 standard ZIP command:
 
 ```bash
-	python3 -m zipfile -c my_robot_description.zip my_robot_description
-	python3 -m zipfile -c my_robot_viewers.zip my_robot_description/viewers
+python3 -m zipfile -c my_robot_description.zip my_robot_description
+python3 -m zipfile -c my_robot_viewers.zip my_robot_description/viewers
 ```
 
 The first archive contains the complete buildable ROS package. The second
@@ -62,138 +133,53 @@ The launch command remains `ros2 launch my_robot_description display.launch.py`.
 
 ## Requirements
 
-Install the tools needed for your workflow:
+Python on your terminal, Python embedded in Fusion, and Python supplied by ROS are **different runtimes**. Installing a newer host Python does not upgrade Fusion.
 
-| Task | Requirements |
-| --- | --- |
-| Install the exporter | Host Python 3.11+ on `PATH`; the launchers do not download it |
-| Export from CAD | Autodesk Fusion May 2025 or newer on macOS or Windows; Python 3.11+ for TOML configuration |
-| Load the package | ROS 2 Humble or Jazzy on your ROS machine |
-| Run offline tests | Python 3.11+ |
-| Reproduce end-to-end checks | Fusion, Python test requirements, Blender, and a running Docker Engine with free disk space |
+| Workflow | Required / supported | Evidence and boundaries |
+| --- | --- | --- |
+| Install, build the single-file CLI, run offline tests | Host CPython **3.11+** on `PATH` | CI matrix: **3.11, 3.12, 3.13, 3.14**; configured coverage is not a claim that each hosted job has passed |
+| Export CAD | Autodesk Fusion **May 2025+**, macOS or Windows; embedded Python **3.11+** for TOML | Native checks: Fusion **2705.1.30**, embedded Python **3.14.0**, on macOS; not every Fusion build is verified |
+| Display and command the exported package | ROS 2 **Humble / Ubuntu 22.04** or **Jazzy / Ubuntu 24.04** | Installed-package and mock-controller checks on both; ROS uses its own Python (Humble's Python 3.10 is not the host-tool requirement) |
+| Reproduce full verification | Fusion, optional [test requirements](requirements-test.txt), Blender, and Docker Engine | External tools, not exporter dependencies; see [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Rebuild movie / labeled ROS pictures | Optional [media requirement](requirements-media.txt), FFmpeg/ffprobe, GUI-enabled Docker image | See [showcase instructions](docs/showcase.md) |
 
-ROS and Blender are not exporter dependencies. Fusion and ROS can run on different computers. Native verification used Fusion 2705.1.30; the README renders used Blender 5.2.2 LTS.
+Fusion is not natively supported on Linux; Linux can consume the ROS packages and run verification. Custom installer paths do not certify Fusion under Wine. Windows launcher tests are configured in CI; local macOS results are not native Windows evidence.
+
+ROS and Blender are not required to export. Fusion and ROS can run on different computers. The README previews used Blender **5.2.2 LTS**. The tools do not download Python or require administrator privileges for default user-local installation.
 
 ## Install and export
 
-Clone or download the complete repository. Open a terminal in the checkout and
-run the installer for your platform. The launchers require host Python 3.11 or
-newer. Fusion's embedded Python does not run the installer. The launchers do not
-download Python or other dependencies, request administrator access, or pause
-for input.
+The [quick start](#quick-start) installs the complete exporter into Fusion's default Scripts folder:
 
-On Windows:
-
-```powershell
-	.\install.cmd
-```
-
-On macOS:
-
-```bash
-	bash install.sh
-```
-
-You can also run `./install.sh` on macOS or Linux. On Linux or Wine, include
-`--scripts-dir` as shown below. There is no automatic Linux or Wine path guess.
-
-If the launcher reports that Python is missing or too old, install Python 3.11
-or newer separately and reopen your terminal. On macOS or Linux, make
-`python3` or `python` available on `PATH`. On Windows, make `py.exe`,
-`python3.exe`, or `python.exe` available on `PATH`. The launchers check the
-version before running the installer. Windows batch interpreter shims are not
-used.
-
-The installer copies the complete `URDF_Exporter` directory into the default
-Scripts folder. It leaves the checkout intact and excludes bytecode caches.
-The printed destination contains the entry script, manifest, `core`, `utils`,
-license, and configuration template.
-
-| Platform | Fusion API scripts directory |
+| Platform | Default Scripts folder |
 | --- | --- |
 | Windows | `%APPDATA%\Autodesk\Autodesk Fusion 360\API\Scripts` |
 | macOS | `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts` |
 
-These are the always-searched defaults in Autodesk's
-[folder reference](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/WritingDebugging_UM.htm#DefaultFolders).
-If you changed Fusion's API folder preference, use `--scripts-dir` for that
-location instead.
-
-For a custom location or a Linux Wine installation, pass the Scripts parent
-directory explicitly. Do not append `URDF_Exporter` to this path.
+Both launchers accept the same flags:
 
 ```bash
-	bash install.sh --scripts-dir "/path/to/Autodesk Fusion 360/API/Scripts" --dry-run
-	bash install.sh --scripts-dir "/path/to/Autodesk Fusion 360/API/Scripts"
+bash install.sh --scripts-dir "/custom/Fusion/API/Scripts" --dry-run
+bash install.sh --update
 ```
 
-On Windows, use the same options:
+Use `.\install.cmd` with the same arguments on Windows. `--scripts-dir` names the **Scripts parent**, not its `URDF_Exporter` subfolder; use it again on updates if you used it initially.
 
-```powershell
-	.\install.cmd --scripts-dir "C:\Fusion Scripts" --dry-run
-	.\install.cmd --scripts-dir "C:\Fusion Scripts"
-```
+The installer preserves `xacro_export.toml` byte-for-byte and retains the old installation outside Scripts under `.fusion360tourdf-backups/`. It leaves the checkout intact and never starts Fusion or changes its folder preferences. Restart Fusion after updates so cached modules are not reused. See [detailed installation and recovery](docs/installation.md).
 
-`--dry-run` prints the planned operation without creating directories or copying
-files. The launchers also work when invoked by path from another directory.
-Relative `--scripts-dir` paths stay relative to your terminal's current directory.
+### Command-line integration
 
-In Fusion, open **Utilities > Add-ins > Scripts and Add-ins > Scripts**.
-If `URDF_Exporter` is absent after a restart, use the **+** command to link the
-installed directory printed by the installer.
-You can also link the checkout's script directory instead of copying it.
-The installer does not start the script or change Fusion's folder preferences.
-Prepare the model using the checklist below, then select `URDF_Exporter` and
-choose **Run**. Choose a fresh output parent folder and inspect the resulting
-`your_robot_description` directory.
-
-### Update an installation
-
-Save your work and close Fusion before replacing an installation. Use
-`--update` with the same location:
+Need to pass installation around as one executable file instead of a checkout? Build the standard-library Python zipapp:
 
 ```bash
-	bash install.sh --update --dry-run
-	bash install.sh --update
+python3 tools/build_installer.py --output artifacts/fusion360tourdf-install.pyz
+python3 artifacts/fusion360tourdf-install.pyz --help
+python3 artifacts/fusion360tourdf-install.pyz --dry-run
 ```
 
-On Windows:
+The `.pyz` bundles the exporter, configuration template, and license notices. It runs without the original checkout and delegates all install/update rules to the same Python helper. On macOS/Linux it is also executable as `./artifacts/fusion360tourdf-install.pyz`; on Windows use `py -3 artifacts\fusion360tourdf-install.pyz` with a 3.11+ runtime selected.
 
-```powershell
-	.\install.cmd --update --dry-run
-	.\install.cmd --update
-```
-
-If you set `--scripts-dir` for the first install, include it again. Changed
-installations require `--update`.
-The installer preserves the installed `xacro_export.toml` byte-for-byte and
-retains a backup of the previous directory outside Scripts. An identical
-installation needs no update. Review configuration changes before using a
-preserved older TOML file. The installer does not migrate its options.
-
-Backups stay under the Scripts folder's parent in
-`.fusion360tourdf-backups/URDF_Exporter-<unique>/URDF_Exporter`. On a handled
-publication failure, the installer tries to restore the old directory. If
-restoration fails, the error reports the retained backup path. Power loss is
-not automatically recovered. Inspect the backup before retrying an interrupted
-update, and run only one installer at a time.
-
-If a terminal cannot display a path character, the report uses a backslash
-escape for that character. The actual folder and file names stay unchanged.
-
-The launchers delegate copying and backup policy to `tools/install_fusion.py`.
-For a manual fallback with a known Python 3.11+ runtime, run
-`python3 tools/install_fusion.py` or `py -3 tools/install_fusion.py` on Windows.
-The helper accepts the same options.
-
-You can still copy the complete `URDF_Exporter` directory manually. Do not copy
-only `URDF_Exporter.py` or merge old modules into a new installation.
-Restart Fusion after replacing exporter modules so cached Python imports do
-not continue running an older version. The installer does not close Fusion for
-you. Native Windows and macOS installer jobs have not run for this change.
-Local wrapper checks used Linux Bash, not native Fusion registration. Running
-Fusion through Wine is not a supported Autodesk platform and has not been
-certified by these tests.
+**This is not a native `.exe` or a bundled Python runtime:** recipients still need Python 3.11+. We do not ship a standalone CAD converter or support an `export model.f3d` shell command. Native binaries would not remove the Fusion requirement. [CLI options, exit codes, trust, and automation boundaries](docs/cli.md).
 
 ### Prepare the model
 
@@ -291,33 +277,19 @@ Follow the [demo workflow](docs/demo-workflow.md) for Fusion setup, commands, ev
 
 ## Verification
 
-The October 18, 2026 records below cover prior source snapshots. The native
-results were recorded on macOS, not by this Linux publication session, and do
-not certify the merged revision. Separate shell-installer and viewer-layout
-baseline receipts are retained in the verification results.
-
-The October 18 checks covered the following cases:
+On October 19, 2026, the macOS integration run pulled `7bf5a13` and verified the combined component-URDF and `viewers/` changes. The labeled RViz captures and movie use that fresh native export:
 
 | Check | Observed result |
 | --- | --- |
-| Offline regressions | 194 tests passed |
-| Native Fusion fixtures | Eleven parametric/direct cases passed |
+| Offline regressions | 275 tests on CPython 3.11.11 and 3.13.2: 262 passed, 13 platform skips per run |
+| Offline in Docker Jazzy / Python 3.12 | Same 275 tests: 263 passed, 12 platform skips |
+| Single-file installer | Install, dry-run, safe update/backup, private-config exclusion, license inclusion, and POSIX execution passed |
 | Native six-link demo | 449 CAD/export assertions passed |
-| Independent loader and Blender | Real exported meshes, zero/moved placement, and rejected wrong-axis/shifted/missing-mesh controls |
+| Component URDFs | All six loaded independently with their shared visual/collision meshes |
+| Independent loader and Blender | Seven integration tests and three Blender variants passed; wrong-axis/shifted/missing-mesh controls rejected |
 | ROS 2 Humble and Jazzy | Installed native assets matched hashes; controllers activated; trajectory, joint feedback, and six-link transforms passed |
 
-See the [verification results](docs/verification-results.md) for versions, source hashes, local receipts, and coverage limits. These results cover the exercised inputs, not every Fusion assembly or a comparison run against other exporters.
-
-To run the offline and generated-package suites from the checkout root:
-
-```bash
-python3 -m unittest discover -s tests -v
-python3 tools/verify_fusion_coverage.py --output artifacts/fusion-coverage
-bash tools/verify_docker.sh humble artifacts
-bash tools/verify_docker.sh jazzy artifacts
-```
-
-The [testing guide](docs/testing.md) covers cross-tool loading, native fixtures, runtime checks, and cleanup. A passing offline suite is not native Fusion proof; `--require-complete` remains nonzero when full input coverage is unproven.
+An earlier eleven-case native fixture run covers its own source snapshot, not the entire merged tree. Native Windows execution and hosted Python 3.12/3.14 jobs require their own CI evidence. See [verification results](docs/verification-results.md) for source hashes, receipts, and limits: these checks do not establish universal CAD coverage, real hardware, or a head-to-head comparison with other exporters. Developer setup and test requirements are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Supported inputs and limits
 
@@ -342,13 +314,21 @@ Consult the [input-support matrix](docs/fusion-coverage.md) for case-level statu
 Choose the guide for your next task:
 
 - [Model requirements](DESIGN_RULES.md): assembly, frames, and output invariants
+- [Installation and recovery](docs/installation.md): paths, safe updates, manual fallback, and troubleshooting
+- [CLI integration](docs/cli.md): single-file executable installer and automation boundaries
 - [Assembly and export guide](docs/exporting.md): root selection, physical properties, configuration, and troubleshooting
 - [Native demo workflow](docs/demo-workflow.md): create, verify, and photograph a real Fusion model
 - [Testing guide](docs/testing.md): offline, loader, Blender, Docker, and native recipes
 - [Verification results](docs/verification-results.md): executed evidence and remaining limits
+- [Contributing](CONTRIBUTING.md): development setup, tests, and review requirements
+- [Showcase capture](docs/showcase.md): real RViz pictures, motion, and the walkthrough build
 
 `Example/Basic_Robot.f3d` is the inherited sample. Its adjacent ROS 1 package is historical output; re-export the design for ROS 2.
 
 ## License and attribution
 
-MIT. This project is a fork of [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf), originally authored by Toshinori Kitamura and contributors. See [LICENSE](LICENSE) and [CHANGELOG.md](CHANGELOG.md).
+MIT, retaining Toshinori Kitamura's original copyright. See [LICENSE](LICENSE), the [license index](LICENSES.md), and [bundled third-party notices](URDF_Exporter/THIRD_PARTY_NOTICES.md) for all nine pinned repositories and their retained copyright/license texts. Notices distinguish inherited code, adapted guidance, and comparison-only sources; listing a project does not imply its code was imported wholesale.
+
+## Contribute or report a problem
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for developer setup and verification requirements. For a bug, [open an issue](https://github.com/kyeshmz/fusion360tourdf/issues/new) with your Fusion/OS versions, relevant TOML settings, exact error, and a minimal shareable model. Remove private CAD, account data, and credentials before attaching files. Please keep source-preservation and negative-control checks intact when proposing a fix.

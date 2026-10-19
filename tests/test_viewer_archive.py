@@ -44,7 +44,8 @@ class ViewerArchiveTest(unittest.TestCase):
 
     def test_full_package_zip_resolves_launch_assets_after_relocation(self):
         expected = {
-            'CMakeLists.txt', 'package.xml', 'urdf/bot.xacro',
+            'CMakeLists.txt', 'package.xml', 'urdf/bot.xacro', 'urdf/bot.urdf',
+            'urdf/components/base_link.urdf', 'urdf/components/arm_1.urdf', 'urdf/components/tool.urdf',
             'meshes/base_link.stl', 'meshes/arm_1.stl', 'meshes/tool.stl',
             'viewers/display.launch.py', 'viewers/display.rviz',
             'launch/control.launch.py', 'config/controllers.yaml', 'config/robot_data.yaml',

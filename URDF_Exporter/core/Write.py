@@ -1,4 +1,5 @@
 # Original exporter by syuntoku14. See the repository MIT license.
+import copy
 import json
 import os
 from pathlib import Path
@@ -195,8 +196,15 @@ def write_ros2_package(destination, robot_name, joints_dict, inertial_dict, *, w
         stage = Path(temporary)
         for folder in ('urdf', 'meshes', 'launch', 'config', 'viewers'):
             (stage / folder).mkdir()
-        _write_xml(stage / 'urdf' / (robot_name + '.xacro'),
-                   _robot_xml(robot_name, destination.name, joints, inertial_dict, frames, movable, config))
+        robot = _robot_xml(robot_name, destination.name, joints, inertial_dict, frames, movable, config)
+        _write_xml(stage / 'urdf' / (robot_name + '.xacro'), robot)
+        _write_xml(stage / 'urdf' / (robot_name + '.urdf'), robot)
+        components = stage / 'urdf/components'
+        components.mkdir()
+        for link in robot.findall('link'):
+            component = ET.Element('robot', name=robot_name + '_' + link.get('name'))
+            component.append(copy.deepcopy(link))
+            _write_xml(components / (link.get('name') + '.urdf'), component)
         (stage / 'viewers/display.launch.py').write_text(_launch(destination.name, robot_name), encoding='utf-8')
         (stage / 'viewers/display.rviz').write_text('''Panels:
   - Class: rviz_common/Displays
@@ -231,8 +239,10 @@ Visualization Manager:
             }
             (stage / 'config/controllers.yaml').write_text(json.dumps(controllers, indent=2) + '\n', encoding='utf-8')
         sidecar = {'robot_name': robot_name, 'package_name': destination.name,
-                   'links': list(inertial_dict), 'joints': joints, 'closing_joints': closing,
-                   'warnings': warnings + loop_warnings}
+                    'links': list(inertial_dict), 'joints': joints, 'closing_joints': closing,
+                    'urdf': 'urdf/' + robot_name + '.urdf',
+                    'component_urdfs': {name: 'urdf/components/' + name + '.urdf' for name in inertial_dict},
+                    'warnings': warnings + loop_warnings}
         if inertial_dict['base_link'].get('source_notes'):
             sidecar['source_notes'] = inertial_dict['base_link']['source_notes']
         (stage / 'config/robot_data.yaml').write_text(json.dumps(sidecar, indent=2) + '\n', encoding='utf-8')

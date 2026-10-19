@@ -1,0 +1,153 @@
+{
+  "robot_name": "rotary_slide",
+  "package_name": "rotary_slide_description",
+  "links": [
+    "mast_1",
+    "boom_1_carriage_1_sensor_1",
+    "boom_1_carriage_1_sensor_2",
+    "boom_1_carriage_1",
+    "boom_1",
+    "base_link"
+  ],
+  "joints": {
+    "rigid_attachment_mast_1": {
+      "parent": "base_link",
+      "child": "mast_1",
+      "type": "fixed",
+      "xyz": [
+        -0.07,
+        0.0,
+        0.24
+      ],
+      "axis": [
+        0,
+        0,
+        0
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "rigid_constraints": [
+        {
+          "name": "mast:1.isGroundToParent",
+          "source": "Fusion grounding",
+          "relationships": [
+            {
+              "path": "mast:1",
+              "property": "isGroundToParent"
+            }
+          ]
+        }
+      ]
+    },
+    "turn": {
+      "parent": "mast_1",
+      "child": "boom_1",
+      "type": "revolute",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "upper_limit": 1.5707963267948966,
+      "lower_limit": -1.0471975511965976,
+      "xyz": [
+        -0.07,
+        0.0,
+        0.24
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        1.5707963267948966
+      ],
+      "effort": 100.0,
+      "velocity": 100.0
+    },
+    "boom_1_extend": {
+      "parent": "boom_1",
+      "child": "boom_1_carriage_1",
+      "type": "prismatic",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "upper_limit": 0.04,
+      "lower_limit": -0.02,
+      "xyz": [
+        -0.07,
+        0.14,
+        0.255
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "effort": 100.0,
+      "velocity": 100.0
+    },
+    "boom_1_carriage_1_sensor_mount_1": {
+      "parent": "boom_1_carriage_1",
+      "child": "boom_1_carriage_1_sensor_1",
+      "type": "fixed",
+      "axis": [
+        0,
+        0,
+        0
+      ],
+      "upper_limit": 0.0,
+      "lower_limit": 0.0,
+      "xyz": [
+        -0.07,
+        0.14,
+        0.255
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "effort": 100.0,
+      "velocity": 100.0
+    },
+    "boom_1_carriage_1_sensor_mount_2": {
+      "parent": "boom_1_carriage_1",
+      "child": "boom_1_carriage_1_sensor_2",
+      "type": "fixed",
+      "axis": [
+        0,
+        0,
+        0
+      ],
+      "upper_limit": 0.0,
+      "lower_limit": 0.0,
+      "xyz": [
+        -0.07,
+        0.14,
+        0.255
+      ],
+      "rpy": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "effort": 100.0,
+      "velocity": 100.0
+    }
+  },
+  "closing_joints": [],
+  "urdf": "urdf/rotary_slide.urdf",
+  "component_urdfs": {
+    "mast_1": "urdf/components/mast_1.urdf",
+    "boom_1_carriage_1_sensor_1": "urdf/components/boom_1_carriage_1_sensor_1.urdf",
+    "boom_1_carriage_1_sensor_2": "urdf/components/boom_1_carriage_1_sensor_2.urdf",
+    "boom_1_carriage_1": "urdf/components/boom_1_carriage_1.urdf",
+    "boom_1": "urdf/components/boom_1.urdf",
+    "base_link": "urdf/components/base_link.urdf"
+  },
+  "warnings": []
+}

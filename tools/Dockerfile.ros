@@ -11,6 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
     && rm -rf /var/lib/apt/lists/*
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ARG WITH_GUI=false
+RUN if [ "$WITH_GUI" = true ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        xvfb xauth xdotool ffmpeg libgl1-mesa-dri \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 WORKDIR /repo
 COPY . /repo
 ENTRYPOINT ["/ros_entrypoint.sh"]

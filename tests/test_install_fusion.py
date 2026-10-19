@@ -328,7 +328,8 @@ class InstallFusionTests(unittest.TestCase):
         self.assertEqual(outside.read_bytes(), b'untouched')
         self.assertFalse(self.scripts.exists())
         link.unlink()
-        for name in ('URDF_Exporter.manifest', 'utils/transforms.py', 'utils/stl.py'):
+        for name in ('URDF_Exporter.manifest', 'utils/transforms.py', 'utils/stl.py',
+                     'THIRD_PARTY_NOTICES.md', 'licenses/Adriaeik-MIT.txt'):
             with self.subTest(missing=name):
                 path = self.source / name
                 original = path.read_bytes()
