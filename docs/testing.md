@@ -60,6 +60,36 @@ The complete offline suite requires Python 3.11 or newer for TOML-file tests.
 Programmatic fixture generation also supports Humble's Python 3.10 without
 adding a TOML dependency to the exporter.
 
+The installer and viewer archive checks run without Fusion or ROS:
+
+```bash
+	python3 -m unittest tests.test_install_fusion tests.test_install_launchers tests.test_viewer_archive -v
+```
+
+Installer tests use temporary Scripts folders. They do not replace a real
+Autodesk installation. The launcher tests invoke real Bash on POSIX and real
+`cmd.exe` on native Windows. They copy a checkout into a temporary path with
+spaces, Unicode, and shell punctuation. They exercise caller-relative targets,
+dry runs, installed bytes, configuration and backup preservation, and backend
+failure exit codes. Interpreter checks cover Python 3.11+ selection and disabled
+automatic runtime downloads. Bash PATH stand-ins also check argument boundaries
+and one backend dispatch after probing. On Windows, the missing-interpreter
+test can skip if a runtime remains discoverable outside its isolated PATH.
+
+On POSIX, also check Bash syntax:
+
+```bash
+	bash -n install.sh
+```
+
+Native CMD tests skip on Linux and macOS. Bash execution tests skip on Windows.
+Linux source inspection does not verify Windows batch behavior. Backend Windows
+and macOS default-path unit tests use supplied platform/environment values, not
+those operating systems. The workflow defines installer jobs for both native
+platforms and runs the backend and launcher suites in each job. A job definition
+is not a completed hosted run. Native Fusion GUI behavior remains a separate
+unverified gate until exercised in Fusion.
+
 These tests use deterministic Fusion doubles and generated packages. They do
 not open Autodesk Fusion or establish that its STL exporter uses the expected
 coordinate frame.
@@ -112,6 +142,18 @@ install space before resolving the package:
 `check_urdf` establishes that urdfdom can parse the model. It does not establish
 that meshes load or that joints move correctly. Verify mesh resources from the
 installed package rather than accidentally using source-tree files.
+
+Use a normal copy install for this strict portable-package check. With
+`--symlink-install`, resolved meshes can point into the source workspace and
+fail the package-contained resource guard. A failure at that guard is not
+evidence that ROS cannot launch the package, but it leaves that install mode's
+full runtime behavior unverified here.
+
+The installed display assets are `viewers/display.launch.py` and
+`viewers/display.rviz`. ROS package lookup still uses the launch filename,
+without a `viewers/` prefix. The Docker suites require that lookup to resolve
+the installed viewer path and reject legacy duplicate viewer files.
+`launch/control.launch.py` and `config/controllers.yaml` keep their paths.
 
 For a movable robot, `control.launch.py` starts mock ros2_control. Its
 joint-state broadcaster and trajectory controller must become active. A

@@ -78,7 +78,7 @@ class PackageTest(unittest.TestCase):
                                      'arm_1': 'arm_1.stl', 'tool': 'tool.stl'}])
         self.assertEqual({str(p.relative_to(result)) for p in result.rglob('*') if p.is_file()}, {
             'urdf/bot.xacro', 'meshes/base_link.stl', 'meshes/arm_1.stl', 'meshes/tool.stl',
-            'launch/display.launch.py', 'launch/control.launch.py', 'config/display.rviz',
+            'viewers/display.launch.py', 'launch/control.launch.py', 'viewers/display.rviz',
             'config/controllers.yaml', 'config/robot_data.yaml', 'package.xml', 'CMakeLists.txt',
         })
         robot = ET.parse(result / 'urdf/bot.xacro').getroot()
@@ -101,17 +101,21 @@ class PackageTest(unittest.TestCase):
         metadata = ET.parse(result / 'package.xml').getroot()
         self.assertEqual(metadata.findtext('name'), 'bot_description')
         self.assertEqual(metadata.findtext('export/build_type'), 'ament_cmake')
-        self.assertIn('install(DIRECTORY urdf meshes launch config', (result / 'CMakeLists.txt').read_text())
+        self.assertIn('install(DIRECTORY urdf meshes launch config viewers DESTINATION share/${PROJECT_NAME})',
+                      (result / 'CMakeLists.txt').read_text())
         deps = [e.text for e in metadata.findall('exec_depend')]
         self.assertIn('joint_state_publisher', deps)
         self.assertIn('controller_manager', deps)
         self.assertFalse(any('gazebo' in d or 'ros_gz' in d for d in deps))
-        display = (result / 'launch/display.launch.py').read_text()
+        display = (result / 'viewers/display.launch.py').read_text()
         control = (result / 'launch/control.launch.py').read_text()
         compile(display, 'display.launch.py', 'exec')
         compile(control, 'control.launch.py', 'exec')
         self.assertIn("UnlessCondition(LaunchConfiguration('gui'))", display)
         self.assertIn("IfCondition(LaunchConfiguration('rviz'))", display)
+        for launch in (display, control):
+            self.assertIn("os.path.join(pkg, 'viewers', 'display.rviz')", launch)
+            self.assertNotIn("os.path.join(pkg, 'config', 'display.rviz')", launch)
         self.assertNotIn('joint_state_publisher', control)
         self.assertIn("('~/robot_description', '/robot_description')", control)
         self.assertIn("('robot_description', '/robot_description')", control)
@@ -152,7 +156,10 @@ class PackageTest(unittest.TestCase):
                 self.assertIsNone(robot.find('ros2_control'))
                 self.assertFalse((result / 'launch/control.launch.py').exists())
                 self.assertFalse((result / 'config/controllers.yaml').exists())
-                self.assertTrue((result / 'launch/display.launch.py').is_file())
+                self.assertEqual({p.name for p in (result / 'viewers').iterdir()},
+                                 {'display.launch.py', 'display.rviz'})
+                self.assertEqual(list((result / 'launch').iterdir()), [])
+                self.assertEqual({p.name for p in (result / 'config').iterdir()}, {'robot_data.yaml'})
 
     def test_closing_joints_keep_full_metadata_outside_tree(self):
         self.joints['loop'] = dict(self.joints['shoulder'], parent='tool', child='base_link')

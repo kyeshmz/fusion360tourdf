@@ -55,12 +55,30 @@ def stop_launch(process):
 
 
 def check_installed(package, robot_name, output):
-    for relative in ('package.xml', 'launch/display.launch.py',
-                     'config/display.rviz', 'config/robot_data.yaml'):
+    from ros2launch.api import get_share_file_path_from_package
+
+    for relative in ('package.xml', 'viewers/display.launch.py',
+                     'viewers/display.rviz', 'config/robot_data.yaml'):
         assert (package / relative).is_file(), 'Missing installed asset ' + relative
+    for relative in ('launch/display.launch.py', 'config/display.rviz'):
+        assert not (package / relative).exists(), 'Legacy installed viewer asset ' + relative
+    for name in ('display.launch.py', 'display.rviz'):
+        assert list(package.rglob(name)) == [package / 'viewers' / name], 'Duplicate viewer asset ' + name
+    display = get_share_file_path_from_package(package_name=package.name, file_name='display.launch.py')
+    assert Path(display).resolve() == (package / 'viewers/display.launch.py').resolve(), display
     urdf = expand(package, output / (robot_name + '.urdf'))
     check_urdfdom(urdf, output / (robot_name + '-urdfdom.log'))
     root = ET.parse(urdf).getroot()
+    if any(joint.get('type') != 'fixed' for joint in root.findall('joint')):
+        for relative in ('launch/control.launch.py', 'config/controllers.yaml'):
+            assert (package / relative).is_file(), 'Missing installed control asset ' + relative
+        assert list(package.rglob('control.launch.py')) == [package / 'launch/control.launch.py'], \
+            'Duplicate control launch'
+        control = get_share_file_path_from_package(package_name=package.name, file_name='control.launch.py')
+        assert Path(control).resolve() == (package / 'launch/control.launch.py').resolve(), control
+    else:
+        assert not list(package.rglob('control.launch.py')), 'Fixed package has a control launch'
+        assert not list(package.rglob('controllers.yaml')), 'Fixed package has controller configuration'
     assert not root.findall('collision'), 'Root-level collision'
     meshes = set()
     for link in root.findall('link'):

@@ -361,7 +361,7 @@ class WritersTest(unittest.TestCase):
             save_dir = Path(tmp) / 'bot_description'
             Write.write_ros2_package(save_dir, 'bot', joints, inertial, write_meshes=write_meshes)
             for rel in ['urdf/bot.xacro', 'config/controllers.yaml',
-                        'launch/display.launch.py', 'launch/control.launch.py',
+                        'viewers/display.launch.py', 'viewers/display.rviz', 'launch/control.launch.py',
                         'package.xml', 'CMakeLists.txt', 'config/robot_data.yaml']:
                 self.assertTrue(os.path.exists(os.path.join(save_dir, rel)), rel)
             with open(os.path.join(save_dir, 'config', 'robot_data.yaml')) as fh:

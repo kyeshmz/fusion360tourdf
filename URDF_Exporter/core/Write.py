@@ -121,7 +121,7 @@ def generate_launch_description():
         Node(package='robot_state_publisher', executable='robot_state_publisher',
              parameters=[{{'robot_description': description}}], output='screen'),
         Node(package='rviz2', executable='rviz2',
-             arguments=['-d', os.path.join(pkg, 'config', 'display.rviz')],
+             arguments=['-d', os.path.join(pkg, 'viewers', 'display.rviz')],
              condition=IfCondition(LaunchConfiguration('rviz'))),
 '''
     if control:
@@ -165,7 +165,7 @@ def _package_metadata(stage, package_name, movable):
     (stage / 'CMakeLists.txt').write_text(f'''cmake_minimum_required(VERSION 3.8)
 project({package_name})
 find_package(ament_cmake REQUIRED)
-install(DIRECTORY urdf meshes launch config DESTINATION share/${{PROJECT_NAME}})
+install(DIRECTORY urdf meshes launch config viewers DESTINATION share/${{PROJECT_NAME}})
 ament_package()
 ''', encoding='utf-8')
 
@@ -193,12 +193,12 @@ def write_ros2_package(destination, robot_name, joints_dict, inertial_dict, *, w
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.' + destination.name + '-', dir=destination.parent) as temporary:
         stage = Path(temporary)
-        for folder in ('urdf', 'meshes', 'launch', 'config'):
+        for folder in ('urdf', 'meshes', 'launch', 'config', 'viewers'):
             (stage / folder).mkdir()
         _write_xml(stage / 'urdf' / (robot_name + '.xacro'),
                    _robot_xml(robot_name, destination.name, joints, inertial_dict, frames, movable, config))
-        (stage / 'launch/display.launch.py').write_text(_launch(destination.name, robot_name), encoding='utf-8')
-        (stage / 'config/display.rviz').write_text('''Panels:
+        (stage / 'viewers/display.launch.py').write_text(_launch(destination.name, robot_name), encoding='utf-8')
+        (stage / 'viewers/display.rviz').write_text('''Panels:
   - Class: rviz_common/Displays
 Visualization Manager:
   Class: ""

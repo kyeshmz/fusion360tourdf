@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Installation and viewer archives
+
+- Add a standard-library installer for the Fusion Scripts directory, with
+  Windows and macOS defaults and an explicit custom-directory option.
+- Add terminal entry points `install.sh` and `install.cmd` with Python 3.11+
+  version checks and no automatic runtime downloads. Keep install policy in
+  the Python helper and preserve caller-relative paths, arguments, and exit codes.
+- Preserve local configuration and the previous installation on explicit
+  updates. Keep the checkout intact.
+- Add Bash CLI regressions and native-Windows CMD tests to the installer suite.
+  Run installer CI on Windows and macOS. Native CI results remain unverified
+  until those jobs execute.
+- Group generated ROS 2 display launch and RViz files under `viewers/`.
+  Keep the package launch command and control-file locations unchanged.
+- Check viewer ZIP contents and installed ROS launch discovery.
+
 ### ROS 2-only package generation and verification
 
 - Replace separate ROS 1 and ROS 2 writer sequences with one complete-package

@@ -27,22 +27,115 @@ application exports proxy geometry correctly. See
 
 ## Install in Fusion
 
-Copy the complete `URDF_Exporter` directory, including its `core`, `utils`,
-manifest, and license files. Do not copy only `URDF_Exporter.py`.
+Open a terminal in the complete checkout and run the installer for your platform.
+The launchers require host Python 3.11 or newer underneath. Fusion's embedded
+Python does not run the installer. The launchers do not download Python or other
+dependencies, request administrator access, or pause for input.
+
+On Windows:
+
+```powershell
+	.\install.cmd
+```
+
+On macOS:
+
+```bash
+	bash install.sh
+```
+
+You can also run `./install.sh` on macOS or Linux. On Linux or Wine, include
+`--scripts-dir` as shown below. There is no automatic Linux or Wine path guess.
+
+If the launcher reports that Python is missing or too old, install Python 3.11
+or newer separately and reopen your terminal. On macOS or Linux, make
+`python3` or `python` available on `PATH`. On Windows, make `py.exe`,
+`python3.exe`, or `python.exe` available on `PATH`. The launchers check the
+version before running the installer. Windows batch interpreter shims are not
+used.
+
+The installer copies the complete `URDF_Exporter` directory into the default
+Scripts folder. It leaves the checkout intact and excludes bytecode caches.
+The printed destination contains the entry script, manifest, `core`, `utils`,
+license, and configuration template.
 
 | Platform | Fusion API scripts directory |
 | --- | --- |
 | Windows | `%APPDATA%\Autodesk\Autodesk Fusion 360\API\Scripts` |
 | macOS | `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/Scripts` |
 
-In Fusion, open **Utilities**, **Add-ins**, and **Scripts and Add-ins**.
-Use the Scripts tab to add or refresh the `URDF_Exporter` script. You can also
-add the checkout's script directory directly instead of copying it.
+These are the always-searched defaults in Autodesk's
+[folder reference](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/WritingDebugging_UM.htm#DefaultFolders).
+If you changed Fusion's API folder preference, use `--scripts-dir` for that
+location instead.
 
-Before updating an existing installation, preserve your `xacro_export.toml`.
-Remove obsolete options only after reviewing the configuration table below.
+For a custom location or a Linux Wine installation, pass the Scripts parent
+directory explicitly. Do not append `URDF_Exporter` to this path.
+
+```bash
+	bash install.sh --scripts-dir "/path/to/Autodesk Fusion 360/API/Scripts" --dry-run
+	bash install.sh --scripts-dir "/path/to/Autodesk Fusion 360/API/Scripts"
+```
+
+On Windows, use the same options:
+
+```powershell
+	.\install.cmd --scripts-dir "C:\Fusion Scripts" --dry-run
+	.\install.cmd --scripts-dir "C:\Fusion Scripts"
+```
+
+`--dry-run` prints the planned operation without creating directories or copying
+files. The launchers also work when invoked by path from another directory.
+Relative `--scripts-dir` paths stay relative to your terminal's current directory.
+
+In Fusion, open **Utilities**, **Add-ins**, and **Scripts and Add-ins**.
+Select `URDF_Exporter` and choose **Run**. If it is absent after a restart,
+use the **+** command to link the installed directory printed by the installer.
+You can also link the checkout's script directory instead of copying it.
+The installer does not start the script or change Fusion's folder preferences.
+
+Save your work and close Fusion before replacing an installation. Use
+`--update` with the same location:
+
+```bash
+	bash install.sh --update --dry-run
+	bash install.sh --update
+```
+
+On Windows:
+
+```powershell
+	.\install.cmd --update --dry-run
+	.\install.cmd --update
+```
+
+If you set `--scripts-dir` for the first install, include it again. Changed
+installations require `--update`.
+The installer preserves the installed `xacro_export.toml` byte-for-byte and
+retains a backup of the previous directory outside Scripts. An identical
+installation needs no update. Review configuration changes before using a
+preserved older TOML file. The installer does not migrate its options.
+
+Backups stay under the Scripts folder's parent in
+`.fusion360tourdf-backups/URDF_Exporter-<unique>/URDF_Exporter`. On a handled
+publication failure, the installer tries to restore the old directory. If
+restoration fails, the error reports the retained backup path. Power loss is
+not automatically recovered. Inspect the backup before retrying an interrupted
+update, and run only one installer at a time.
+
+If a terminal cannot display a path character, the report uses a backslash
+escape for that character. The actual folder and file names stay unchanged.
+
+The launchers delegate copying and backup policy to `tools/install_fusion.py`.
+For a manual fallback with a known Python 3.11+ runtime, run
+`python3 tools/install_fusion.py` or `py -3 tools/install_fusion.py` on Windows.
+The helper accepts the same options.
+
+You can still copy the complete `URDF_Exporter` directory manually. Do not copy
+only `URDF_Exporter.py` or merge old modules into a new installation.
 Save your work and restart Fusion after replacing exporter modules so cached
 Python imports do not continue running an older version.
+The installer does not close Fusion for you.
 Running Fusion through Wine is not a supported Autodesk platform and has not
 been certified by these tests.
 
@@ -176,9 +269,9 @@ The package layout is:
   CMakeLists.txt
   urdf/<robot>.xacro
   meshes/<link>.stl
-  launch/display.launch.py
+  viewers/display.launch.py
+  viewers/display.rviz
   launch/control.launch.py
-  config/display.rviz
   config/controllers.yaml
   config/robot_data.yaml
 ```
@@ -188,6 +281,29 @@ controller configuration. Fixed-only robots do not need empty hardware systems.
 `robot_data.yaml` contains topology, export metadata, warnings, and removed
 loop-closing constraints. JSON formatting in these `.yaml` files is valid YAML.
 
+### Archive the package or viewers
+
+The display launcher and RViz configuration live together in `viewers/`.
+Control files stay under `launch/` and `config/`. The exporter does not copy
+Blender or validation helpers into the robot package.
+
+This layout applies to new exports. Re-export an older model into a fresh
+directory. Moving old files alone does not update their launch and CMake paths.
+
+From the export's parent directory, create either archive with Python's
+standard ZIP command:
+
+```bash
+	python3 -m zipfile -c my_robot_description.zip my_robot_description
+	python3 -m zipfile -c my_robot_viewers.zip my_robot_description/viewers
+```
+
+The first archive contains the complete buildable ROS package. The second
+contains only `viewers/`. It requires the matching description package's URDF,
+meshes, and package metadata. Extract the viewer folder into that package.
+Keep the full directory layout when building the complete package.
+The launch command remains `ros2 launch my_robot_description display.launch.py`.
+
 URDF describes a tree. A closure sidecar records information but does not enforce
 the original mechanism. A four-bar linkage reduced to a tree is not equivalent
 closed-chain motion. Generalized joints and motion coupling must not be
@@ -195,8 +311,10 @@ advertised as preserved unless their conversion is implemented and tested.
 
 ## Configure the export
 
-Copy `URDF_Exporter/xacro_export.template.toml` to `xacro_export.toml` beside the
-entry script. Use TOML values with their actual types:
+In the installed `URDF_Exporter` directory printed by the installer, copy
+`xacro_export.template.toml` to `xacro_export.toml` beside the entry script.
+If Fusion runs the checkout directly, create that file in the checkout instead.
+Use TOML values with their actual types:
 
 ```toml
 mesh_refinement = "low"
@@ -230,10 +348,15 @@ Humble instead.
 
 ```bash
 	rosdep install --from-paths src --ignore-src -r -y
-	colcon build --symlink-install
+	colcon build
 	source install/setup.bash
 	ros2 launch my_robot_description display.launch.py
 ```
+
+Use the copy install shown above for a self-contained install space.
+`--symlink-install` keeps dependencies on the source workspace and is rejected
+by the strict portable-mesh checks. Its full launch and controller behavior is
+not certified by those checks.
 
 The default display launch starts the joint-state GUI and RViz. For headless
 loading, use:
