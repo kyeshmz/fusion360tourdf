@@ -201,8 +201,15 @@ def assert_source_unchanged(before, after):
 
 
 def entity_evidence(entities):
-    return [dict(path=path, object_type=entity.objectType, token=getattr(entity, 'entityToken', None))
-            for path, entity in entities]
+    result = []
+    for path, entity in entities:
+        entry = dict(path=path, object_type=entity.objectType)
+        try:
+            entry['token'] = getattr(entity, 'entityToken', None)
+        except RuntimeError as error:
+            entry.update(token=None, token_unavailable=str(error))
+        result.append(entry)
+    return result
 
 
 def assert_entity_identity(before, after):
@@ -268,7 +275,7 @@ class Report:
 def source_hashes(repository):
     repository = Path(repository).resolve()
     inputs = {}
-    for folder in ('URDF_Exporter', 'tools/verify_fusion'):
+    for folder in ('URDF_Exporter', 'tools'):
         for path in sorted((repository / folder).rglob('*')):
             if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
                 inputs[path.relative_to(repository).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -377,6 +384,25 @@ def _fixture_displacements(joints, positions):
             raise ValueError('Fixture joints are disconnected')
         pending = remaining
     return displacements
+
+
+def pose_expectations(boxes_by_link, joints, zero_frames):
+    """Build independent downstream expectations from literal CAD fixture inputs."""
+    def matrix(pose):
+        rotation, translation = pose
+        return [[*rotation[3*i:3*i+3], translation[i]] for i in range(3)] + [[0, 0, 0, 1]]
+
+    target = {joint.name: joint.sample_position for joint in joints if joint.kind != 'fixed'}
+    states = {'zero': dict.fromkeys(target, 0.0), 'moved': target}
+    result = {}
+    for name, positions in states.items():
+        displacements = _fixture_displacements(joints, positions)
+        result[name] = dict(positions=positions,
+            link_poses={link: matrix(compose(displacements[link], zero_frames[link])) for link in boxes_by_link},
+            visual_poses={link: matrix(displacements[link]) for link in boxes_by_link},
+            bounds={link: bounds(transform(displacements[link], point) for box in boxes for point in box_corners(box))
+                    for link, boxes in boxes_by_link.items()})
+    return result
 
 
 def verify_package(package, boxes_by_link, cad_bounds, expected_joints, checks=None):

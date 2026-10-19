@@ -1,7 +1,7 @@
 # Run owned-document Fusion verification
 
 Run this script inside Autodesk Fusion. Do not run `verify_fusion.py` with system Python.
-Native execution is unverified. Offline tests do not establish a Fusion pass.
+Offline tests do not establish a native Fusion pass. Inspect the report from your actual run.
 
 1. Keep the checkout intact so `tools/verify_fusion` and `URDF_Exporter` share the same repository root.
 2. Save your existing work and restart Fusion after updating exporter or verifier modules, and before each verification run. Do not run the exporter first.
@@ -12,9 +12,10 @@ Native execution is unverified. Offline tests do not establish a Fusion pass.
 7. Read the result message and open the reported `report.json` path.
 8. If a case fails, retain its report and any exported packages. Read the recorded traceback and failed assertion before rerunning.
 
-Expect eleven case entries. Five fixtures run in separate new documents in both parametric and direct modes.
-The fixtures cover root-owned solids with a hidden body, geometry-free rigid as-built joints at a translated 90-degree pose,
-ordinary revolute and slider joints with finite limits and hidden joint markers, and repeated components beneath a body-owning parent.
+Expect eleven case entries in separate new documents. Both modes cover root-owned solids with a hidden body,
+ordinary revolute and slider joints with finite limits and hidden joint markers, and translated/rotated nested repeated components.
+Parametric fixed fixtures use geometry-free rigid as-built joints. Direct fixed fixtures use native Ground To Parent instead:
+Fusion refuses as-built-joint creation in direct designs. These are different input cases, not direct-mode as-built proof.
 An additional parametric fixture creates an editable rectangle sketch and extrusion driven by the `proof_height` user parameter.
 The ordinary joints start at zero motion. Rotated asymmetric boxes expose axis swaps independently of joint motion.
 
@@ -24,6 +25,7 @@ Inspect `timeline.features` for feature names, types, suppression, and health st
 Inspect `parameters` for user and model parameter expressions, units, and values.
 The runner retains API references and checks entity equality before and after export.
 The `source_entities_before` and `source_entities_after` tokens are evidence only. Different token strings can identify the same entity.
+Unsupported proxy-token getters are recorded as `token_unavailable`; retained API-reference equality remains mandatory.
 The script changes design mode only in an empty document that it created. It never rolls a timeline.
 The runner checks Hybrid design intent when the SDK exposes that property. It does not change design intent.
 It attempts to close only its owned documents without saving and restores the previously active document after each case.
@@ -36,7 +38,8 @@ The XML checks cover zero-pose visual and collision placement, mass, world COM, 
 Revolute joints must lie on the literal expected world axis line. A pivot shift along that line is physically equivalent and accepted.
 The runner also evaluates exported URDF FK at nonzero joint positions and compares moved mesh bounds and COM against literal fixture motion.
 Expected motion uses fixture world axes and pivots, never exported joint origins or production transform helpers.
-STL bytes use millimeters. Fusion dimensions use centimeters. XML mass and inertia use kilograms and kilogram square meters.
+STL bytes use millimeters. Native body triangles are explicitly transformed into root context; proxy STL export alone is not sufficient.
+Fusion dimensions use centimeters. XML mass and inertia use kilograms and kilogram square meters.
 Native body mass supplies the analytic box density. The expected dimensions, centers, and 90-degree rotations do not use exporter transform helpers.
 The runner calls `URDF_Exporter.URDF_Exporter.export_design` with a fresh description-directory path.
 The resolved default configuration is recorded and passed explicitly to that operation.
@@ -53,6 +56,9 @@ Do not interpret an overall `pass` as universal Fusion coverage. Original joint-
 This script does not induce topology edits that invalidate original geometry, move the history marker, or actuate native joints at nonzero positions.
 It does not automate or launch the native application outside Fusion's authorized script interface.
 An interrupted run can leave `running` entries and an open owned fixture. Such a run is not a pass.
+
+For a retained, inspectable robot whose actual exported package is built and commanded in Docker, use
+the [rotary-slide demo workflow](../../docs/demo-workflow.md).
 
 To check the independent math, source-state comparisons, report persistence, and document ownership guards offline, run these commands from the repository root:
 

@@ -18,6 +18,8 @@ from .verification import (Box, Checks, IDENTITY, Joint, QUARTER_TURN, Report,
 
 
 FIXTURES = ('root_bodies', 'rigid_as_built', 'ordinary_revolute', 'ordinary_slider', 'nested_repeated')
+MODE_FIXTURES = {'parametric': FIXTURES + ('parametric_history',),
+                 'direct': ('root_bodies', 'grounded_assembly', 'ordinary_revolute', 'ordinary_slider', 'nested_grounded')}
 BASE = Box((.02, .04, .06), (.01, .02, .03))
 BLOCK = Box((.03, .05, .07), (.02, .03, .04))
 
@@ -72,13 +74,14 @@ def _add_box(design, component, name, box):
     return body
 
 
-def _rigid(root, child, parent, name):
+def _rigid(root, child, parent, name, *, context=None):
     joint_input = root.asBuiltJoints.createInput(child, parent, None)
     if not joint_input.setAsRigidJointMotion():
         raise RuntimeError('Fusion refused rigid as-built motion')
     joint = root.asBuiltJoints.add(joint_input)
     joint.name = name
-    return Joint(name, 'base_link' if parent.component.name == 'base_link' else _name(parent),
+    source_name = _name(context) + '_' + name if context is not None else name
+    return Joint(source_name, 'base_link' if parent.component.name == 'base_link' else _name(parent),
                  _name(child), 'fixed')
 
 
@@ -120,7 +123,6 @@ def _ordinary(root, child, parent, fixture):
 
 def _fixtures(design, fixture):
     root = design.rootComponent
-    root.name = fixture
     bindings, joints = [], []
     if fixture == 'parametric_history':
         parameter = design.userParameters.add('proof_height', adsk.core.ValueInput.createByString('60 mm'),
@@ -156,12 +158,16 @@ def _fixtures(design, fixture):
         _add_box(design, child.component, 'moving_solid', box)
         joints.append(_ordinary(root, child, base, fixture))
         bindings.append((_name(child), child, 'moving_solid', box))
-    elif fixture == 'rigid_as_built':
+    elif fixture in ('rigid_as_built', 'grounded_assembly'):
         child = _component(root, 'rigid_child', (10, 20, 30), QUARTER_TURN)
         _add_box(design, child.component, 'rigid_solid', BLOCK)
-        joints.append(_rigid(root, child, base, 'rigid_mount'))
+        if fixture == 'grounded_assembly':
+            child.isGroundToParent = True
+            joints.append(Joint('rigid_attachment_' + _name(child), 'base_link', _name(child), 'fixed'))
+        else:
+            joints.append(_rigid(root, child, base, 'rigid_mount'))
         bindings.append((_name(child), child, 'rigid_solid', replace(BLOCK, center_m=(.07, .22, .34), rotation=QUARTER_TURN)))
-    elif fixture == 'nested_repeated':
+    elif fixture in ('nested_repeated', 'nested_grounded'):
         carrier = _component(root, 'carrier', (10, 20, 30), QUARTER_TURN)
         _add_box(design, carrier.component, 'carrier_solid', BASE)
         nested = _component(carrier.component, 'block', (0, 10, 0), QUARTER_TURN)
@@ -169,9 +175,16 @@ def _fixtures(design, fixture):
         child = nested.createForAssemblyContext(carrier)
         repeat = root.occurrences.addExistingComponent(nested.component, _matrix((30, 0, 10)))
         repeat.isGroundToParent = False
-        joints.extend((_rigid(root, carrier, base, 'carrier_mount'),
-                       _rigid(root, child, carrier, 'nested_mount'),
-                       _rigid(root, repeat, base, 'repeat_mount')))
+        if fixture == 'nested_grounded':
+            repeat.transform2 = _matrix((30, 0, 10))
+            for occurrence in (carrier, nested, repeat):
+                occurrence.isGroundToParent = True
+            joints.extend(Joint('rigid_attachment_' + _name(occurrence), 'base_link', _name(occurrence), 'fixed')
+                          for occurrence in (carrier, child, repeat))
+        else:
+            joints.extend((_rigid(root, carrier, base, 'carrier_mount'),
+                           _rigid(root, child, carrier, 'nested_mount', context=carrier),
+                           _rigid(root, repeat, base, 'repeat_mount')))
         bindings.extend(((_name(carrier), carrier, 'carrier_solid', replace(BASE, center_m=(.08, .21, .33), rotation=QUARTER_TURN)),
                          (_name(child), child, 'block_solid', replace(BLOCK, center_m=(-.02, .17, .34), rotation=(-1, 0, 0, 0, -1, 0, 0, 0, 1))),
                          (_name(repeat), repeat, 'block_solid', replace(BLOCK, center_m=(.32, .03, .14)))))
@@ -225,9 +238,10 @@ def source_snapshot(design, entities=None):
             features.append(signature)
             entities.append(('timeline[%d]' % i, entity))
         timeline = dict(marker=design.timeline.markerPosition, count=design.timeline.count, features=features)
-    user_names = {parameter.name for parameter in design.userParameters}
+    parametric = design.designType == adsk.fusion.DesignTypes.ParametricDesignType
+    user_names = {parameter.name for parameter in design.userParameters} if parametric else set()
     parameters = []
-    for parameter in design.allParameters:
+    for parameter in design.allParameters if parametric else ():
         parameters.append(dict(name=parameter.name, expression=parameter.expression, unit=parameter.unit,
                                value=parameter.value, comment=parameter.comment, is_user=parameter.name in user_names))
         entities.append(('parameter[' + parameter.name + ']', parameter))
@@ -270,7 +284,9 @@ def source_snapshot(design, entities=None):
 def run_verification(app, output_parent):
     """Run the production export on newly owned fixtures and retain every case report."""
     directory = Path(tempfile.mkdtemp(prefix='fusion-proof-', dir=str(output_parent)))
-    report = Report(directory, app.version, len(FIXTURES) * 2 + 1)
+    report = Report(directory, app.version, sum(map(len, MODE_FIXTURES.values())))
+    report.data['coverage'].append(dict(name='direct_as_built_creation', status='not_exercised',
+        reason='Fusion only creates as-built joints in parametric designs. Direct fixed fixtures use native grounding instead.'))
     report.data['started_at_utc'] = datetime.now(timezone.utc).isoformat()
     report.data['repository'] = str(Path(__file__).resolve().parents[2])
     try:
@@ -307,7 +323,7 @@ def run_verification(app, output_parent):
         modes = (('parametric', adsk.fusion.DesignTypes.ParametricDesignType),
                   ('direct', adsk.fusion.DesignTypes.DirectDesignType))
         for mode_name, mode in modes:
-            for fixture in FIXTURES + (('parametric_history',) if mode_name == 'parametric' else ()):
+            for fixture in MODE_FIXTURES[mode_name]:
                 destination = directory / (fixture + '_' + mode_name + '_description')
                 case = report.start_case(fixture, mode_name, destination)
                 checks = Checks(case['assertions'])

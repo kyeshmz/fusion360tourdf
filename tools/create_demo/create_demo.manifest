@@ -1,0 +1,8 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "script",
+  "author": "fusion360tourdf contributors",
+  "description": {"": "Create and export an independently checked rotary-slide inspection robot"},
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

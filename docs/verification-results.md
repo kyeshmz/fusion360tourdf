@@ -1,12 +1,63 @@
 # Verification results
 
+## October 18, 2026: native Fusion and actual-export E2E
+
+A dirty working tree based on `3dc5306b9df4afc398ee13929292350bd96273d1` was tested
+through the real Fusion MCP. Final native execution used Fusion `2705.1.30` and Python `3.14.0`.
+Reports retain exact source hashes and loaded-code comparisons; this is not a claim about the unchanged Git commit.
+
+The local bundle is `artifacts/rotary-slide-demo-20261018/` (ignored by Git, not distributed).
+It includes `assembly.f3d`, the package, `native.json`, independent `expected.json`,
+and a verbatim copy of the end-to-end evidence under `e2e/`.
+The full run, including failed candidates, remains at
+`/private/var/folders/q6/tz5lqjtn66q2cw4jg9qtfcj00000gn/T/opencode/fusion360tourdf-e2e-LVpJ8i/`.
+
+| Check | Observed result | Local receipt within the bundle |
+| --- | --- | --- |
+| Offline regressions | 190 tests passed | `evidence/offline.log` |
+| Native fixtures | Eleven cases, 1,742 assertions; source preservation and cleanup passed | `evidence/native-regressions.json` |
+| Native demo | Six links and two moving joints; 449 assertions and 24 retained entity identities passed | `native.json` |
+| Independent loader | Actual CAD meshes and zero/moved FK and bounds passed | `e2e/loaders.json` |
+| Negative controls | Wrong axis, 100 mm mesh shift, and missing mesh rejected | `e2e/summary.json` |
+| Blender 5.2.2 LTS | Twelve visual/collision objects per pose; both poses passed and scene saved | `e2e/blender/` |
+| Actual export, Humble | Native package built/installed; 13 installed assets matched hashes; display, controllers, trajectory, feedback, and six-link TF passed | `e2e/humble/docker-humble-NrmxDG/ros-humble-pm28fY/ros.json` |
+| Actual export, Jazzy | The same actual-export checks passed | `e2e/jazzy/docker-jazzy-Z2MtHq/ros-jazzy-5BdLBi/ros.json` |
+| Existing cross-tool suite | Six integration tests and three Blender variants passed; urdfdom ran in Docker | `evidence/cross-tools/` |
+| Cleanup | No owned test container or tagged image remained | `evidence/cleanup.json` |
+
+Both actual-export ROS reports identify `rmw_cyclonedds_cpp`, active joint-state/trajectory
+controllers, trajectory error code zero, and feedback matching `turn = pi/4` and
+`boom_1_extend = 0.025` meters. They are labeled `installed-native-fusion-export`, not generated fixtures.
+The generated-fixture Docker suites also passed on both distributions.
+
+Native execution exposed component-local proxy STL output. Production export now explicitly
+exports native bodies and transforms their triangles and normals into root context without
+moving source geometry. Verifier fixes cover immutable root names, parametric-only parameter
+collections, unavailable proxy tokens, and contextual joint names. Direct fixed fixtures use
+grounding because the SDK rejects as-built-joint creation in direct mode.
+
+Demo authoring captures an explicitly placed nested copy before constraining it. Geometry-free
+rigid sensor joints use the owning carriage anchor; distinct sensor placement is preserved in
+visual/collision origins and independently checked bounds. An earlier candidate failed an
+overly strict component-frame assumption in the downstream oracle. Its receipt is retained;
+geometry assertions and negative controls were not relaxed.
+
+The eleven-case run used fresh exporter imports. The final demo-only oracle change was
+explicitly reloaded without restarting Fusion; loaded-code checks matched disk. Production
+exporter and native-regression helper hashes were unchanged between those runs.
+
+This proves the exercised pipeline, not every Fusion input, competing exporters, native nonzero
+actuation, physics, hardware, or GUI RViz rendering. See the [reproduction guide](demo-workflow.md).
+
+## October 17, 2026: historical offline and runtime evidence
+
 The Fusion-only expansion was checked on October 17, 2026 in an uncommitted
 working tree based on `b637eed`. The latest local run passed the offline,
 cross-tool, and Docker ROS 2 checks below. **Full Fusion coverage and universal
 superiority are not verified.** No native Fusion application case or hosted CI
 job was executed.
 
-## Latest local evidence
+### Historical local evidence
 
 Detailed evidence is retained under
 `/tmp/opencode/fusion360tourdf-fusion-proof-hSWDaJ/`. These are local paths,
@@ -91,21 +142,20 @@ Reviews used separate sessions on the inherited model. They are not
 cross-family corroboration. Code hashes and the decision trail identify
 which source snapshot each receipt covers.
 
-## Native Fusion gate remains open
+## Remaining native Fusion coverage limits
 
-The [native verifier](../tools/verify_fusion/README.md) is prepared for eleven
-owned-document cases, including parametric/direct modes and an editable
-sketch/extrusion fixture. It records source-state preservation, code provenance,
-assertions, cleanup and exported assets. It must run inside Autodesk Fusion.
-The application is installed outside the shell's normal path, but this session
-has no desktop-control tool and did not drive it.
+The [native verifier](../tools/verify_fusion/README.md) has executed evidence for eleven
+owned-document cases, including separate parametric/direct fixtures and editable history.
+These receipts do not promote the complete declared input matrix to native certification.
+The coverage runner intentionally retains its separate offline evidence level.
 
 The native helper's mesh checks target disjoint analytic boxes, not arbitrary
 CAD geometry. Its original-reference invalidation case remains
 `not_exercised`; it does not actuate native joints at nonzero values. The helper
-evaluates exported URDF motion numerically instead. Actual proxy mesh
-coordinates, SDK equality/context semantics, grounding, appearance extraction,
-and edited-history behavior remain native-unverified.
+evaluates exported URDF motion numerically instead. Proxy mesh placement, SDK entity equality,
+grounding, and source-history preservation were exercised for these fixtures/demo only.
+General edited-topology behavior, original-reference invalidation, broader grounding cases,
+and appearance/fidelity policies still need separate native inputs.
 
 Motion-link/mimic conversion, mesh-only physical/export policy, general bodyless
 frames, active generalized-joint decomposition, and per-body/face materials or

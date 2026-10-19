@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 from types import MappingProxyType
 from . import config as config_mod
-from .stl import read_binary_stl
+from .stl import read_binary_stl, transform_binary_stl
 
 
 def sanitize_name(name):
@@ -445,7 +445,14 @@ def export_stl(design, targets, config=None, *, sources=None):
         with tempfile.TemporaryDirectory(prefix='.link-bodies-', dir=target.parent) as temporary:
             count, payload = 0, bytearray()
             for index, body in enumerate(source.bodies):
-                part_count, part_payload = export(body, Path(temporary) / ('%d.stl' % index), name)
+                native = getattr(body, 'nativeObject', None)
+                part_count, part_payload = export(native if native is not None else body,
+                    Path(temporary) / ('%d.stl' % index), name)
+                if native is not None:
+                    matrix = occurrence_matrix_array(source.owner)
+                    if matrix is None:
+                        raise ValueError('MESH_FRAME_UNAVAILABLE: ' + name)
+                    part_payload = transform_binary_stl(part_payload, matrix)
                 count += part_count
                 payload.extend(part_payload)
             target.write_bytes(b'fusion360tourdf direct bodies'.ljust(80, b'\0') + struct.pack('<I', count) + payload)

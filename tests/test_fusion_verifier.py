@@ -269,6 +269,54 @@ class VerificationMathTest(unittest.TestCase):
 
 
 class SourceSafetyTest(unittest.TestCase):
+    def test_unavailable_proxy_token_is_evidence_not_an_identity_failure(self):
+        class Entity:
+            objectType = 'adsk::fusion::Occurrence'
+            isValid = True
+
+            @property
+            def entityToken(self):
+                raise RuntimeError('Tokens require a root-context proxy')
+
+        entity = Entity()
+        evidence = entity_evidence([('nested', entity)])
+        self.assertIsNone(evidence[0]['token'])
+        self.assertIn('root-context', evidence[0]['token_unavailable'])
+        self.assertEqual(assert_entity_identity([('nested', entity)], [('nested', entity)])['status'], 'pass')
+
+    def test_direct_snapshot_never_reads_parametric_only_collections(self):
+        native = load_entrypoint_without_sdk()
+
+        class Direct:
+            designType = 0
+            rootComponent = types.SimpleNamespace(name='direct', bRepBodies=[], allOccurrences=[],
+                                                  allJoints=[], allAsBuiltJoints=[])
+
+            @property
+            def userParameters(self):
+                raise RuntimeError('not parametric')
+
+            @property
+            def allParameters(self):
+                raise RuntimeError('not parametric')
+
+        snapshot = native.source_snapshot(Direct())
+        self.assertEqual((snapshot['timeline'], snapshot['parameters']), (None, []))
+
+    def test_fixture_setup_never_renames_fusion_root(self):
+        native = load_entrypoint_without_sdk()
+
+        class Root:
+            @property
+            def name(self):
+                return 'Untitled'
+
+        root = Root()
+        body = types.SimpleNamespace(name='solid')
+        with patch.object(native, '_add_box', return_value=body):
+            bindings, joints = native._fixtures(types.SimpleNamespace(rootComponent=root), 'root_bodies')
+        self.assertEqual((root.name, len(bindings), joints), ('Untitled', 2, []))
+
     def test_retained_entity_identity_accepts_changed_tokens_but_rejects_replacement(self):
         class Entity:
             objectType = 'adsk::fusion::ExtrudeFeature'

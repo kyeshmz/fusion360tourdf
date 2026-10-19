@@ -90,5 +90,6 @@ tool and checked against the same independent expectations.
   Native [Color.opacity](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/core_Color_opacity.htm)
   is a byte channel.
 
-These contracts are not a completed live Fusion test. Full revisions and
-source paths are retained in [the census](fusion-repositories.json).
+Reading these contracts does not establish a live Fusion test. See the
+[execution receipts](verification-results.md) for the specific native fixtures exercised.
+Full revisions and source paths remain in [the census](fusion-repositories.json).
