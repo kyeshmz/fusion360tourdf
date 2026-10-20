@@ -1,6 +1,6 @@
 # Prepare and configure a Fusion export
 
-Prepare a connected solid assembly, select its root, and export a fresh ROS 2 description package. This guide describes the assembly, frame, and configuration rules behind the [README workflow](../README.md#install-and-export).
+Prepare a connected solid assembly, select its root, and export a fresh ROS 2 description package. This guide describes the assembly, frame, and configuration rules behind the [README workflow](../README.md#export-in-fusion).
 
 ## Choose the exported assembly
 

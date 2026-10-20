@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="360" viewBox="0 0 1440 360" role="img" aria-labelledby="banner-title banner-description">
+  <title id="banner-title">fusion360tourdf</title>
+  <desc id="banner-description">Fusion assemblies to ROS 2 robot descriptions. An original stylized mechanical arm sits beside the project wordmark on a dark navy background.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1440" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10262e"/>
+      <stop offset="1" stop-color="#173941"/>
+    </linearGradient>
+    <linearGradient id="grid-fade" x1="936" y1="0" x2="1100" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0"/>
+      <stop offset="1" stop-color="white"/>
+    </linearGradient>
+    <linearGradient id="arm-finish" x1="1080" y1="100" x2="1200" y2="270" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c7ddd2"/>
+      <stop offset="1" stop-color="#76aba2"/>
+    </linearGradient>
+    <pattern id="construction-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#99bcbc" stroke-opacity="0.12"/>
+    </pattern>
+    <mask id="grid-mask">
+      <rect x="936" width="504" height="360" fill="url(#grid-fade)"/>
+    </mask>
+    <clipPath id="banner-outline">
+      <rect width="1440" height="360" rx="18"/>
+    </clipPath>
+  </defs>
+  <rect width="1440" height="360" rx="18" fill="url(#background)"/>
+  <g aria-hidden="true" clip-path="url(#banner-outline)">
+    <rect x="936" width="504" height="360" fill="url(#construction-grid)" mask="url(#grid-mask)"/>
+    <g fill="none" stroke="#99bcbc" stroke-width="1">
+      <circle cx="1194" cy="181" r="148" stroke-opacity="0.16"/>
+      <circle cx="1194" cy="181" r="112" stroke-opacity="0.08"/>
+      <path d="M998 181H1390M1194 28V334" stroke-opacity="0.1"/>
+      <path d="M1188 33H1200M1188 329H1200M1046 175V187M1342 175V187" stroke-opacity="0.4"/>
+    </g>
+    <rect x="96" y="105" width="48" height="4" rx="2" fill="#d49a75"/>
+    <path d="M1046 303H1350" fill="none" stroke="#99bcbc" stroke-opacity="0.25"/>
+    <g stroke="#10262e" stroke-width="3" stroke-linejoin="round">
+      <path d="M1113 273H1226L1243 289H1097Z" fill="#a2c7b9"/>
+      <path d="M1097 289H1243V300H1097Z" fill="#527f7e"/>
+      <rect x="1136" y="245" width="56" height="29" rx="5" fill="#76aba2"/>
+      <path d="M1072 153Q1064 137 1080 127L1087 122Q1103 114 1114 131L1182 232Q1191 246 1175 258L1168 263Q1151 272 1142 255Z" fill="url(#arm-finish)"/>
+      <path d="M1083 119L1220 79Q1237 74 1244 91L1247 100Q1252 117 1235 122L1100 161Q1082 165 1076 149L1073 140Q1067 124 1083 119Z" fill="url(#arm-finish)"/>
+      <path d="M1244 92L1283 116L1268 139L1227 115Z" fill="#76aba2"/>
+      <path d="M1281 108L1297 119L1277 148L1260 137Z" fill="#d49a75"/>
+      <path d="M1295 123L1326 143L1331 162L1320 169L1317 151L1287 133Z" fill="#c7ddd2"/>
+      <path d="M1277 147L1297 170L1316 175L1320 165L1306 160L1287 140Z" fill="#c7ddd2"/>
+    </g>
+    <g fill="none" stroke-linecap="round">
+      <path d="M1120 134L1202 110M1115 173L1146 220" stroke="#315f63" stroke-width="11"/>
+      <path d="M1116 119L1203 94" stroke="#f5f2e9" stroke-opacity="0.45" stroke-width="2"/>
+    </g>
+    <g fill="#173941" stroke="#8cbdb4" stroke-width="6">
+      <circle cx="1092" cy="140" r="28"/>
+      <circle cx="1163" cy="246" r="28"/>
+      <circle cx="1231" cy="101" r="21"/>
+    </g>
+    <circle cx="1092" cy="140" r="17" fill="#d49a75"/>
+    <circle cx="1163" cy="246" r="17" fill="#a2c7b9"/>
+    <circle cx="1231" cy="101" r="9" fill="#d49a75"/>
+    <g fill="#173941">
+      <circle cx="1092" cy="140" r="5"/>
+      <circle cx="1163" cy="246" r="5"/>
+    </g>
+  </g>
+  <g font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="92" y="185" fill="#f5f2e9" font-size="78" font-weight="700" letter-spacing="-2.4">fusion360tourdf</text>
+    <text x="96" y="234" fill="#b5c9cc" font-size="26">Fusion assemblies to ROS 2 robot descriptions</text>
+  </g>
+</svg>

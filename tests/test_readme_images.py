@@ -17,9 +17,9 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 
 
 class ReadmeImagesTest(unittest.TestCase):
-    def test_readme_images_are_valid_sized_pngs_with_matching_receipts(self):
+    def test_verification_images_are_valid_sized_pngs_with_matching_receipts(self):
         directory = REPOSITORY / 'docs/images'
-        readme = (REPOSITORY / 'README.md').read_text()
+        gallery = (REPOSITORY / 'docs/verification.md').read_text()
         render = json.loads((directory / 'images.json').read_text())
         images = list(render['images'].values())
         self.assertEqual(len(images), 3)
@@ -29,7 +29,7 @@ class ReadmeImagesTest(unittest.TestCase):
                 self.assertEqual(data[:8], b'\x89PNG\r\n\x1a\n')
                 self.assertEqual(struct.unpack('>II', data[16:24]), (1280, 960))
                 self.assertEqual(hashlib.sha256(data).hexdigest(), metadata['sha256'])
-                self.assertIn('](docs/images/' + metadata['path'] + ')', readme)
+                self.assertIn('](images/' + metadata['path'] + ')', gallery)
 
     def test_fusion_image_copy_checks_hash_and_supports_older_bundles(self):
         with tempfile.TemporaryDirectory() as directory:
