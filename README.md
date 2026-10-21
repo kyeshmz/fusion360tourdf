@@ -1,5 +1,3 @@
-# fusion360tourdf
-
 ![fusion360tourdf project banner](docs/images/banner.svg)
 
 [![Python tools: 3.11+](https://img.shields.io/badge/Python_tools-3.11%2B-3776AB?logo=python&logoColor=white)](#requirements)
@@ -13,6 +11,7 @@ The dependency-free exporter runs **inside Fusion** and preserves the source des
 Terminal installers place its files. They do not perform headless CAD export.
 
 This is an integration fork of [syuntoku14/fusion2urdf](https://github.com/syuntoku14/fusion2urdf), not a from-scratch exporter.
+This independent community fork is not affiliated with or endorsed by Autodesk.
 See [source credits and licenses](LICENSES.md) and the [combined-version changelog](changelog.md).
 
 [Install](#install) · [Export](#export-in-fusion) · [Demo files](#ready-to-use-demo) · [Verification](docs/verification.md) · [Contributing](CONTRIBUTING.md)
@@ -24,6 +23,19 @@ See [source credits and licenses](LICENSES.md) and the [combined-version changel
 - Nested and repeated component instances with distinct identities and supported fixed, rotary, and slider connections.
 - RViz display assets under `viewers/` and mock ros2_control launch/configuration for movable robots.
 - Transactional publication into a fresh package, with topology/warning metadata and no source assembly changes.
+
+## Motivation
+
+Existing Fusion-to-URDF exporters provided a useful foundation, but their assembly handling did not consistently meet this project's needs.
+The [source comparison](docs/related-work.md) documents gaps and tradeoffs in nested/repeated instances, joint frames, physical properties, and export safety.
+Some documented workflows even recommended disabling design history as a workaround.
+
+A successful export message and valid XML are not enough if parts overlap, a joint turns about the wrong axis, or mesh scale and inertia are wrong.
+This fork aims to carry the assembly into ROS 2 correctly without sacrificing the editable CAD design or requiring manual URDF repairs.
+That means preserving instance identities, geometry, joint travel, and physical data, and treating incomplete exports as failures rather than success.
+
+We build on and credit the existing exporters instead of starting over.
+The goal is a reliable Fusion-to-ROS 2 workflow with [explicit limits](#supported-inputs-and-limits), not a claim that every alternative is broken or every Fusion mechanism is supported.
 
 ## Requirements
 
@@ -123,11 +135,12 @@ The [showcase guide](docs/showcase.md) covers media capture. See the [archive in
 
 ## Supported inputs and limits
 
-Use connected BRep solid assemblies with physical links and supported rigid, revolute, continuous, or slider joints.
-Nested/repeated occurrences, root-owned bodies, locked joints, and rigid groups are supported within the [input-support matrix](docs/fusion-coverage.md).
-Ground To Parent support is partial. Unresolved bodyless/world frames fail rather than receive guessed attachments.
+Default export targets connected BRep solids with physical data and rigid, revolute, continuous, or slider joints.
+Nested/repeated occurrences, root-owned bodies, locked joints, rigid groups, and referenced frame-only links are covered by the [input-support matrix](docs/fusion-coverage.md).
+Frame links receive no invented mass or geometry. Dangling or ambiguous constraints fail explicitly.
 
-Motion-link/mimic conversion, mesh-only physical inputs, general bodyless endpoints, active generalized joints, and per-body/face textures or materials remain gaps.
+Opt-in modes add generalized/mimic motion, explicit mesh physics, portable per-body/face diffuse assets and textures, convex collisions, and output-frame/inertia policies.
+These new modes have fixture-based checks; native-host/original-CAD gaps, bounded Ball coordinates, and unsupported shader semantics remain explicit in the matrix and linked guides.
 URDF describes a tree. The loop-closure sidecar records removed constraints but does not enforce closed-chain motion.
 ROS 1, SDF, MJCF, simulator backends, and other CAD systems are outside the maintained output scope.
 `Example/Basic_Robot.f3d` is the inherited sample. Its adjacent ROS 1 output is historical. Re-export the design for ROS 2.

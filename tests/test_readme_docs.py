@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import re
 import unittest
 from urllib.parse import unquote, urlsplit
@@ -14,6 +15,10 @@ class ReadmeDocsTest(unittest.TestCase):
         namespace = '{http://www.w3.org/2000/svg}'
         self.assertEqual(root.tag, namespace + 'svg')
         self.assertEqual(root.get('role'), 'img')
+        self.assertEqual(root.get('viewBox'), '0 0 1440 360')
+        self.assertEqual(root.find(namespace + 'title').text, 'fusion360tourdf')
+        self.assertIn('Autodesk', root.find(namespace + 'desc').text)
+        self.assertIn('fusion360tourdf', [node.text for node in root.iter(namespace + 'text')])
         identifiers = {node.get('id'): node for node in root.iter() if node.get('id')}
         labels = root.get('aria-labelledby', '').split()
         self.assertTrue(labels)
@@ -31,10 +36,33 @@ class ReadmeDocsTest(unittest.TestCase):
                     self.assertTrue(reference.startswith('#'))
                     self.assertIn(reference[1:], identifiers)
 
+    def test_banner_preserves_official_autodesk_geometry_and_attribution(self):
+        root = ET.parse(REPOSITORY / 'docs/images/banner.svg').getroot()
+        namespace = '{http://www.w3.org/2000/svg}'
+        logo = root.find(".//*[@id='autodesk-logo']")
+        self.assertIsNotNone(logo)
+        paths = list(logo.iter(namespace + 'path'))
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(paths[0].get('fill'), '#ffffff')
+        primary_path_sha256 = '9d88855644088bbb104a2a87249493ad7ed7122f5d7a32c38bca8cf266061adf'
+        self.assertEqual(hashlib.sha256(paths[0].get('d').encode()).hexdigest(), primary_path_sha256)
+        attribution = (REPOSITORY / 'docs/images/README.md').read_text()
+        for source in (
+                'https://brand.autodesk.com/visual-system/logo/',
+                'https://brand.autodesk.com/wp-content/themes/autodesk-brand-hub/assets/images/autodesk-brand-logo-white.svg',
+                '0a22763b25d1eab8086ce0437a41ec92e59142d500d436619dc1594ce27bcf66',
+                primary_path_sha256):
+            with self.subTest(source=source):
+                self.assertIn(source, attribution)
+        self.assertIn('Autodesk trademark', attribution)
+        self.assertIn('MIT license does not cover the Autodesk logo', attribution)
+
     def test_front_page_has_banner_and_one_real_motion_demo(self):
         readme = (REPOSITORY / 'README.md').read_text()
         banner = '![fusion360tourdf project banner](docs/images/banner.svg)'
-        self.assertIn(banner, readme)
+        self.assertTrue(readme.startswith(banner + '\n'))
+        self.assertNotRegex(readme, r'(?im)^#\s+fusion360tourdf\s*$')
+        self.assertIn('This independent community fork is not affiliated with or endorsed by Autodesk.', readme)
         self.assertLess(readme.index(banner), readme.index('\n## '))
         images = re.findall(r'!\[[^\]]*\]\(([^)]+)\)', readme)
         self.assertEqual(

@@ -15,3 +15,18 @@ The published set was captured using Fusion 2705.1.30 and Blender 5.2.2 LTS.
 Follow [the image refresh recipe](../demo-workflow.md#refresh-the-readme-pictures) to regenerate
 and publish the complete PNG/metadata set. Fresh demo bundles capture `fusion.png` automatically;
 `tools/verify_export.py` generates the matching exported-pose renders and checks the native screenshot hash.
+
+## Project banner and logo source
+
+`banner.svg` retains the project wordmark and original mechanical-arm illustration.
+The white Autodesk symbol and wordmark identify the target platform, separate from the project identity.
+The logo geometry comes unchanged from the public [Autodesk Brand Hub header SVG](https://brand.autodesk.com/wp-content/themes/autodesk-brand-hub/assets/images/autodesk-brand-logo-white.svg).
+See [Autodesk's logo guidance](https://brand.autodesk.com/visual-system/logo/).
+The embedded path preserves the primary logo subpaths and omits the separate "Brand Hub" label.
+It uses uniform scaling on the banner's dark background.
+
+- Source SVG SHA-256 is `0a22763b25d1eab8086ce0437a41ec92e59142d500d436619dc1594ce27bcf66`.
+- Primary-logo `d` attribute SHA-256 is `9d88855644088bbb104a2a87249493ad7ed7122f5d7a32c38bca8cf266061adf`.
+
+The logo is an Autodesk trademark. The repository's MIT license does not cover the Autodesk logo or grant trademark rights.
+This independent community project is not affiliated with or endorsed by Autodesk.
