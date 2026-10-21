@@ -7,3 +7,10 @@ artifacts/
 build/
 install/
 log/
+
+# Local agent and research output
+.delegation/
+.playwright-mcp/
+evidence/
+reports/
+research_notes/
