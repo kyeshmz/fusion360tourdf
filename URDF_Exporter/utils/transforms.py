@@ -126,10 +126,21 @@ def rotate_vector_by_mat3(vec, mat3):
 def normalize(vec):
     """Return the unit vector for vec, or [0,0,0] when degenerate."""
     try:
-        norm = math.sqrt(sum(v * v for v in vec))
+        values = list(vec)
+        if not all(math.isfinite(v) for v in values):
+            return [0.0, 0.0, 0.0]
+        try:
+            norm = math.sqrt(sum(v * v for v in values))
+        except OverflowError:
+            norm = math.inf
+        if not math.isfinite(norm):
+            scale = max(abs(v) for v in values)
+            scaled = [v / scale for v in values]
+            norm = math.hypot(*scaled)
+            return [v / norm for v in scaled]
         if norm < 1e-12:
             return [0.0, 0.0, 0.0]
-        return [v / norm for v in vec]
+        return [v / norm for v in values]
     except Exception:
         return [0.0, 0.0, 0.0]
 
@@ -154,6 +165,8 @@ def inverse_pose(xyz_m, rpy):
 def format_float(value):
     """Keep enough significant digits to round-trip physical values."""
     f = float(value)
+    if not math.isfinite(f):
+        raise ValueError('Cannot serialize a nonfinite numeric value')
     if f == 0.0:
         return '0'
     text = repr(f)
