@@ -83,3 +83,22 @@ class LinterBoundariesTest(unittest.TestCase):
                 self.assertEqual(main([str(path), '--strict']), 1)
                 path.write_text('<robot name="test"><link name="a"/><link name="b"/></robot>')
                 self.assertEqual(main([str(path)]), 1)
+
+    def test_every_visual_and_collision_mesh_reference_is_checked(self):
+        for section in ('visual', 'collision'):
+            with self.subTest(section=section), tempfile.TemporaryDirectory() as directory:
+                parent = Path(directory)
+                meshes = parent / 'meshes'
+                meshes.mkdir()
+                (meshes / 'first.stl').write_bytes(b'existence-only lint fixture')
+                path = parent / 'multiple.urdf'
+                path.write_text('<robot name="multiple"><link name="base">' +
+                    '<' + section + '><geometry><mesh filename="package://demo/meshes/first.stl"/>'
+                    '</geometry></' + section + '>' +
+                    '<' + section + '><geometry><mesh filename="package://demo/meshes/second.stl"/>'
+                    '</geometry></' + section + '></link></robot>')
+                errors, _ = lint_file(path, meshes)
+                self.assertTrue(any('second.stl' in error for error in errors), errors)
+                (meshes / 'second.stl').write_bytes(b'existence-only lint fixture')
+                errors, _ = lint_file(path, meshes)
+                self.assertFalse(any('mesh missing' in error for error in errors), errors)

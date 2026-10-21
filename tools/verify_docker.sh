@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ $# -lt 2 || $# -gt 3 || ! "$1" =~ ^(humble|jazzy)$ ]]; then
-  echo "Usage: bash tools/verify_docker.sh humble|jazzy OUTPUT [NATIVE_BUNDLE]" >&2
+  echo "Usage: bash tools/verify_docker.sh humble|jazzy OUTPUT [NATIVE_BUNDLE | --fixture=frames]" >&2
   exit 2
 fi
 distro=$1
@@ -19,7 +19,9 @@ cleanup() {
 trap cleanup EXIT
 input=(--mount "type=bind,src=$run,dst=/output")
 command=(bash tools/verify_ros.sh /output)
-if [[ $# == 3 ]]; then
+if [[ $# == 3 && "$3" == --fixture=* ]]; then
+  command=(bash tools/verify_ros.sh /output "$3")
+elif [[ $# == 3 ]]; then
   bundle=$(cd "$3" && pwd -P)
   input+=(--mount "type=bind,src=$bundle,dst=/input,readonly")
   command=(bash tools/verify_ros.sh /output /input)

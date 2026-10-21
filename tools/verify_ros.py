@@ -14,9 +14,10 @@ import time
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.fixtures import VARIANTS, oracle
+from tests.fixtures import fixture_variants, fixture_oracle, OPTIONAL_VARIANTS
 from tools.export_bundle import read_bundle
-from tools.verify_loaders import check_urdfdom, expand, mesh_path
+from tools.verify_loaders import check_urdfdom, expand, mesh_path, expected_link_kinds, asset_receipts, descriptor_for_mesh
+from URDF_Exporter.utils.visual_assets import visual_descriptors
 
 
 def transform_matrix(transform):
@@ -56,7 +57,7 @@ def stop_launch(process):
     raise RuntimeError('Could not stop ROS launch process group ' + str(process.pid))
 
 
-def check_installed(package, robot_name, output, *, source=None):
+def check_installed(package, robot_name, output, *, source=None, expected=None):
     from ros2launch.api import get_share_file_path_from_package
 
     viewers = ('viewers/display.launch.py', 'viewers/display.rviz')
@@ -97,20 +98,44 @@ def check_installed(package, robot_name, output, *, source=None):
             assert len(part.findall('link')) == 1 and not part.findall('joint') and part.find('ros2_control') is None
             assert canonical(part.find('link')) == canonical(link), 'Component link data changed'
     meshes = set()
+    visual_meshes = set()
+    descriptors = asset_receipts(package)
+    asset_paths = {str((package / entry['path']).resolve()) for value in descriptors.values()
+                   for d in visual_descriptors(value) for entry in d['files']}
+    kinds = expected_link_kinds(root, package, next(iter(expected.values())) if expected else None)
     for link in root.findall('link'):
-        assert link.findall('visual') and link.findall('collision'), 'Missing installed geometry'
+        if kinds[link.get('name')] == 'frame':
+            continue
+        visuals = link.findall('visual/geometry/mesh')
+        name = link.get('name')
+        if name in descriptors:
+            declared = [d['mesh_path'] for d in visual_descriptors(descriptors[name])]
+            actual = [descriptor_for_mesh(descriptors[name], v.get('filename'))['mesh_path'] for v in visuals]
+            assert sorted(actual) == sorted(declared), 'Installed visual descriptor/resource membership changed'
+        else:
+            assert len(visuals) == 1, 'Expected one original visual mesh per physical link'
+        visual_meshes.update(mesh_path(v.get('filename'), package, urdf) for v in visuals)
         for mesh in link.findall('.//mesh'):
             path = Path(mesh_path(mesh.get('filename'), package, urdf))
             data = path.read_bytes()
-            assert len(data) >= 84, 'Invalid installed STL'
-            count = struct.unpack_from('<I', data, 80)[0]
-            assert count > 0 and len(data) == 84 + count * 50, 'Invalid installed STL length'
-            for offset in range(84, len(data), 50):
-                assert all(math.isfinite(v) for v in struct.unpack_from('<12f', data, offset))
+            if path.suffix.lower() == '.obj':
+                assert str(path) in asset_paths, 'Unmanifested installed OBJ'
+            else:
+                assert path.suffix.lower() == '.stl', 'Unsupported installed mesh format'
+                assert len(data) >= 84, 'Invalid installed STL'
+                count = struct.unpack_from('<I', data, 80)[0]
+                assert count > 0 and len(data) == 84 + count * 50, 'Invalid installed STL length'
+                for offset in range(84, len(data), 50):
+                    assert all(math.isfinite(v) for v in struct.unpack_from('<12f', data, offset))
             assert mesh.get('scale').split() == ['0.001'] * 3, 'Millimeter mesh scale missing'
             meshes.add(str(path))
-    assert len(meshes) == len(root.findall('link'))
-    return sorted(meshes)
+    if not descriptors:
+        assert len(visual_meshes) == sum(kind == 'physical' for kind in kinds.values()), 'Physical links must retain distinct original visual resources'
+    else:
+        assert {str((package / d['mesh_path']).resolve()) for value in descriptors.values()
+                for d in visual_descriptors(value)} == visual_meshes
+    assert visual_meshes <= meshes
+    return sorted(meshes | asset_paths)
 
 
 def verify_launch(package_name, mode, expected, output, timeout, *, on_pose=None):
@@ -126,6 +151,11 @@ def verify_launch(package_name, mode, expected, output, timeout, *, on_pose=None
         from trajectory_msgs.msg import JointTrajectoryPoint
     except ImportError as exc:
         raise RuntimeError('Selected ROS suite requires sourced ROS runtime and control packages') from exc
+
+    from ament_index_python.packages import get_package_share_directory
+    sidecar = Path(get_package_share_directory(package_name)) / 'config/robot_data.yaml'
+    receipt = json.loads(sidecar.read_text())
+    reference_frame = receipt.get('root_frame', {}).get('output_reference_link', 'base_link')
 
     log = output / (package_name + '-' + mode + '.log')
     node = rclpy.create_node('verify_' + mode)
@@ -145,7 +175,7 @@ def verify_launch(package_name, mode, expected, output, timeout, *, on_pose=None
         command += ['gui:=false', 'rviz:=false']
     action = None
     process = None
-    report = {}
+    report = {'reference_frame': reference_frame}
     with log.open('w') as stream:
         try:
             process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
@@ -163,18 +193,20 @@ def verify_launch(package_name, mode, expected, output, timeout, *, on_pose=None
                 raise TimeoutError(label + ' timed out. See ' + str(log))
 
             def observed_pose(values, after=0):
-                targets = values['positions']
+                targets = values.get('states', values['positions'])
                 if targets and (received[0] <= after or any(
                         name not in latest or not math.isfinite(latest[name]) or
                         abs(latest[name] - target) > 5e-4 for name, target in targets.items())):
                     return False
                 transforms = {}
                 for link, pose in values['link_poses'].items():
-                    if link == 'base_link':
-                        transforms[link] = pose
+                    if link == reference_frame:
+                        actual = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+                        assert matrices_match(actual, pose), 'Expected reference frame must be identity'
+                        transforms[link] = actual
                         continue
                     try:
-                        actual = transform_matrix(buffer.lookup_transform('base_link', link, Time()).transform)
+                        actual = transform_matrix(buffer.lookup_transform(reference_frame, link, Time()).transform)
                     except TransformException:
                         return False
                     if not matrices_match(actual, pose):
@@ -239,12 +271,28 @@ def verify_launch(package_name, mode, expected, output, timeout, *, on_pose=None
     return report
 
 
+def fixture_requires_control(expected):
+    """Select control from the oracle, never from a fixture-name allowlist."""
+    zero = expected['zero']['positions']
+    moved = expected.get('moved', {}).get('positions', {})
+    if not zero:
+        assert not moved, 'Moved commands require declared zero-sample joints'
+        return False
+    assert set(moved) == set(zero), 'Moving fixture requires a complete moved command sample'
+    assert all(math.isfinite(v) for v in moved.values()), 'Nonfinite fixture command'
+    assert any(v != zero[name] for name, v in moved.items()), 'Moving fixture requires changed commands'
+    assert any(v != 0 for v in moved.values()), 'Moving fixture requires a nonzero trajectory'
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--install', type=Path, required=True)
     parser.add_argument('--timeout', type=float, default=45)
-    parser.add_argument('--bundle', type=Path, help='Verify this actual native Fusion export instead of fixtures')
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--bundle', type=Path, help='Verify this actual native Fusion export instead of fixtures')
+    selection.add_argument('--fixture', choices=OPTIONAL_VARIANTS)
     args = parser.parse_args()
     assert args.timeout > 0
     from ament_index_python.packages import get_package_share_directory
@@ -260,8 +308,8 @@ def main():
         cases = [(source.name[:-len('_description')], expected, True, source)]
         report['evidence_kind'] = 'installed-native-fusion-export'
     else:
-        cases = [('fixture_' + variant, oracle(variant == 'fixed'), variant == 'articulated', None)
-                 for variant in VARIANTS]
+        cases = [('fixture_' + variant, expected, fixture_requires_control(expected), None)
+                 for variant in fixture_variants(args.fixture) for expected in (fixture_oracle(variant),)]
         report['evidence_kind'] = 'generated-fixtures'
     rclpy.init()
     try:
@@ -270,7 +318,7 @@ def main():
             package = Path(get_package_share_directory(package_name)).resolve()
             assert package.is_relative_to(args.install.resolve()), 'Launch resolved the source package'
             case = {'install_share': str(package),
-                    'meshes': check_installed(package, robot_name, args.output, source=source)}
+                    'meshes': check_installed(package, robot_name, args.output, source=source, expected=expected)}
             report['packages'][robot_name if source is not None else robot_name.removeprefix('fixture_')] = case
             if source is not None:
                 hashes = {}

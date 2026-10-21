@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "Usage: bash tools/verify_ros.sh OUTPUT [NATIVE_BUNDLE]" >&2
+  echo "Usage: bash tools/verify_ros.sh OUTPUT [NATIVE_BUNDLE | --fixture=frames]" >&2
   exit 2
 fi
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -18,7 +18,10 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export ROS_LOG_DIR="$run/ros-logs"
 export ROS2CLI_DISABLE_DAEMON=1
 input=(--timeout 45)
-if [[ $# == 2 ]]; then
+if [[ $# == 2 && "$2" == --fixture=* ]]; then
+  python3 -m tests.fixtures "$run/ws/src" "$2" >"$run/generate.log" 2>&1
+  input+=("$2")
+elif [[ $# == 2 ]]; then
   bundle=$(cd "$2" && pwd -P)
   python3 - "$bundle" "$run/ws/src" >"$run/generate.log" <<'PY'
 from pathlib import Path

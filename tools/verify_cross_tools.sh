@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ $# != 1 ]]; then
-  echo "Usage: bash tools/verify_cross_tools.sh OUTPUT" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "Usage: bash tools/verify_cross_tools.sh OUTPUT [--fixture=frames]" >&2
   exit 2
 fi
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -16,8 +16,18 @@ command -v "$blender" >/dev/null
 export PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}"
 export VERIFY_OUTPUT="$run/tests"
 "$python" -m unittest discover -s "$repo/tests/integration" -v 2>&1 | tee "$run/tests.log"
-"$python" "$repo/tools/verify_loaders.py" --output "$run/models" >"$run/loaders.log" 2>&1
-for variant in articulated fixed boxes; do
+selection=()
+if [[ $# == 2 ]]; then selection=("$2"); fi
+"$python" "$repo/tools/verify_loaders.py" --output "$run/models" "${selection[@]}" >"$run/loaders.log" 2>&1
+variants=$("$python" - "${selection[@]}" <<'PY'
+import argparse
+from tests.fixtures import fixture_variants, OPTIONAL_VARIANTS
+parser = argparse.ArgumentParser()
+parser.add_argument('--fixture', choices=OPTIONAL_VARIANTS)
+print(' '.join(fixture_variants(parser.parse_args().fixture)))
+PY
+)
+for variant in $variants; do
   "$blender" --background --factory-startup --python-exit-code 1 \
     --python "$repo/tools/verify_blender.py" -- \
     --urdf "$run/models/fixture_$variant.urdf" \

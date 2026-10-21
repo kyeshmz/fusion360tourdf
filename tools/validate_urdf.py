@@ -21,10 +21,14 @@ warnings too.
 """
 
 import argparse
+import json
 import math
 import os
+from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 JOINT_TYPES = {'fixed', 'revolute', 'continuous', 'prismatic', 'floating', 'planar'}
 LIMITED_TYPES = {'revolute', 'prismatic'}
@@ -46,7 +50,7 @@ def _parse_vec(text, count=3):
     return values
 
 
-def lint_file(path, meshes_dir=None):
+def lint_file(path, meshes_dir=None, *, link_kinds=None):
     """Lint one URDF/xacro file. Returns (errors, warnings) string lists."""
     errors, warnings = [], []
     try:
@@ -79,6 +83,16 @@ def lint_file(path, meshes_dir=None):
             errors.append('Duplicate link name: %s.' % name)
             continue
         links[name] = link
+        if link_kinds is not None:
+            kind = link_kinds.get(name)
+            if kind not in ('physical', 'frame'):
+                errors.append('Link %s has missing or unknown declared kind.' % name)
+            if kind == 'frame':
+                if any(link.findall(tag) for tag in ('inertial', 'visual', 'collision')) or link.findall('.//mesh'):
+                    errors.append('Frame link %s must not contain physical or geometry data.' % name)
+                if meshes_dir is not None and os.path.exists(os.path.join(meshes_dir, name + '.stl')):
+                    errors.append('Frame link %s must not have a mesh target.' % name)
+                continue
         inertial = link.find('inertial')
         if inertial is None:
             warnings.append('Link %s has no <inertial>.' % name)
@@ -112,6 +126,8 @@ def lint_file(path, meshes_dir=None):
     if not links:
         errors.append('No <link> elements found.')
         return errors, warnings
+    if link_kinds is not None and set(link_kinds) != set(links):
+        errors.append('Declared link kinds do not match URDF link membership.')
 
     joints = {}
     child_to_parent = {}
@@ -206,22 +222,30 @@ def lint_file(path, meshes_dir=None):
     if meshes_dir is not None:
         for link_name, link in links.items():
             for section in ('visual', 'collision'):
-                elem = link.find(section)
-                if elem is None:
-                    continue
-                mesh = elem.find('geometry/mesh')
-                if mesh is None:
-                    continue
-                filename = mesh.get('filename') or ''
-                if filename.startswith('package://'):
-                    rest = filename[len('package://'):]
-                    parts = rest.split('/', 1)
-                    rel = parts[1] if len(parts) == 2 else rest
-                    candidate = (rel[7:] if rel.startswith('meshes/')
-                                 else os.path.basename(rel))
-                    full = os.path.join(meshes_dir, candidate)
-                    if not os.path.exists(full):
-                        errors.append('Link %s <%s> mesh missing: %s.' % (link_name, section, full))
+                for elem in link.findall(section):
+                    mesh = elem.find('geometry/mesh')
+                    if mesh is None:
+                        continue
+                    filename = mesh.get('filename') or ''
+                    if filename.startswith('package://'):
+                        rest = filename[len('package://'):]
+                        parts = rest.split('/', 1)
+                        rel = parts[1] if len(parts) == 2 else rest
+                        candidate = (rel[7:] if rel.startswith('meshes/')
+                                     else os.path.basename(rel))
+                        full = os.path.join(meshes_dir, candidate)
+                        if not os.path.exists(full):
+                            errors.append('Link %s <%s> mesh missing: %s.' % (link_name, section, full))
+                        elif full.lower().endswith('.obj'):
+                            try:
+                                from tools.verify_loaders import asset_receipts
+                                receipts = asset_receipts(Path(meshes_dir).parent)
+                                from URDF_Exporter.utils.visual_assets import visual_descriptors
+                                if not any(entry['mesh_path'] == rel for value in receipts.values()
+                                           for entry in visual_descriptors(value)):
+                                    raise ValueError('OBJ has no validated portable asset manifest')
+                            except (ValueError, AssertionError, OSError, KeyError, TypeError, AttributeError) as error:
+                                errors.append('Link %s <%s> visual assets invalid: %s.' % (link_name, section, error))
 
     seen = set()
     includes = []
@@ -243,8 +267,20 @@ def main(argv=None):
     parser.add_argument('path', help='Path to .urdf or .xacro file')
     parser.add_argument('--meshes', default=None, help='Directory holding mesh files')
     parser.add_argument('--strict', action='store_true', help='Fail on warnings too')
+    parser.add_argument('--link-kinds', help='JSON mapping of explicit link kinds, or an exporter robot_data.yaml receipt')
     args = parser.parse_args(argv)
-    errors, warnings = lint_file(args.path, args.meshes)
+    kinds = None
+    if args.link_kinds:
+        try:
+            with open(args.link_kinds, encoding='utf-8') as source:
+                kinds = json.load(source)
+            if 'link_sources' in kinds:
+                kinds = {name: entry['kind'] for name, entry in kinds['link_sources'].items()}
+            if not isinstance(kinds, dict):
+                raise ValueError('Link kinds must be an object')
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            parser.error(str(error))
+    errors, warnings = lint_file(args.path, args.meshes, link_kinds=kinds)
     for message in errors:
         print('ERROR: ' + message)
     for message in warnings:

@@ -405,11 +405,15 @@ def pose_expectations(boxes_by_link, joints, zero_frames):
     return result
 
 
-def verify_package(package, boxes_by_link, cad_bounds, expected_joints, checks=None):
+def verify_package(package, boxes_by_link, cad_bounds, expected_joints, checks=None, *, frame_poses=None):
     """Check real mesh bytes and XML against analytic boxes in root-frame SI units."""
     import xml.etree.ElementTree as ET
     package = Path(package).resolve()
     checks = checks if checks is not None else Checks()
+    frame_poses = {} if frame_poses is None else frame_poses
+    if set(frame_poses) & set(boxes_by_link):
+        raise ValueError('Frame and physical expectations must be disjoint')
+    expected_links = set(boxes_by_link) | set(frame_poses)
     xml_files = list((package / 'urdf').glob('*.xacro'))
     checks.equal('robot XML count', len(xml_files), 1)
     robot = ET.parse(xml_files[0]).getroot()
@@ -418,11 +422,11 @@ def verify_package(package, boxes_by_link, cad_bounds, expected_joints, checks=N
     joint_names = [joint.get('name') for joint in joints]
     checks.equal('unique link names', len(link_names), len(set(link_names)))
     checks.equal('unique joint names', len(joint_names), len(set(joint_names)))
-    checks.equal('link identities', sorted(link_names), sorted(boxes_by_link))
+    checks.equal('link identities', sorted(link_names), sorted(expected_links))
     checks.equal('joint identities', sorted(joint_names), sorted(j.name for j in expected_joints))
     checks.equal('tree edge count', len(joints), len(links) - 1)
     frames = _urdf_frames(joints, {})
-    checks.equal('connected links', sorted(frames), sorted(boxes_by_link))
+    checks.equal('connected links', sorted(frames), sorted(expected_links))
     for expected in expected_joints:
         joint = next(j for j in joints if j.get('name') == expected.name)
         checks.equal(expected.name + ' type', joint.get('type'), expected.kind)
@@ -441,33 +445,42 @@ def verify_package(package, boxes_by_link, cad_bounds, expected_joints, checks=N
     mesh_data, inertial_origins = {}, {}
     for link in links:
         name = link.get('name')
+        if name in frame_poses:
+            checks.equal(name + ' frame physical tags', [tag for tag in ('inertial', 'visual', 'collision') if link.findall(tag)], [])
+            checks.equal(name + ' frame mesh target', (package / 'meshes' / (name + '.stl')).exists(), False)
+            checks.close(name + ' frame zero rotation', frames[name][0], frame_poses[name][0])
+            checks.close(name + ' frame zero translation', frames[name][1], frame_poses[name][1])
+            continue
         boxes = boxes_by_link[name]
         expected_bounds = bounds(p for box in boxes for p in box_corners(box))
         checks.close(name + ' analytic versus direct CAD bounds', cad_bounds[name], expected_bounds)
         for kind in ('visual', 'collision'):
-            geometry = link.find(kind)
-            mesh = geometry.find('geometry/mesh')
-            if mesh is None:
-                raise AssertionError('Expected mesh ' + kind + ' for ' + name)
-            prefix = 'package://' + package.name + '/'
-            uri = mesh.get('filename')
-            if not uri.startswith(prefix):
-                raise ValueError('Unexpected mesh package URI ' + uri)
-            path = (package / uri[len(prefix):]).resolve()
-            if package not in path.parents:
-                raise ValueError('Mesh URI escapes package')
-            vertices = stl_vertices(path)
-            vertices_si = [tuple(v * .001 for v in p) for p in vertices]
-            checks.close(name + ' ' + kind + ' raw root-frame STL bounds in meters',
-                         bounds(vertices_si), expected_bounds)
-            check_box_mesh(vertices_si, boxes, checks, name + ' ' + kind)
-            scale = _vector(mesh, 'scale', '1 1 1')
-            origin = _origin(geometry.find('origin'))
-            scaled = [tuple(a*b for a, b in zip(p, scale)) for p in vertices]
-            mesh_data[name, kind] = origin, scaled
-            world = compose(frames[name], origin)
-            actual_bounds = bounds(transform(world, p) for p in scaled)
-            checks.close(name + ' zero-pose ' + kind + ' world bounds', actual_bounds, expected_bounds)
+            geometries = link.findall(kind)
+            if not geometries:
+                raise AssertionError('Missing physical ' + kind + ' for ' + name)
+            mesh_data[name, kind] = []
+            for geometry in geometries:
+                mesh = geometry.find('geometry/mesh')
+                if mesh is None:
+                    raise AssertionError('Expected mesh ' + kind + ' for ' + name)
+                prefix = 'package://' + package.name + '/'
+                uri = mesh.get('filename')
+                if not uri.startswith(prefix):
+                    raise ValueError('Unexpected mesh package URI ' + uri)
+                path = (package / uri[len(prefix):]).resolve()
+                if package not in path.parents:
+                    raise ValueError('Mesh URI escapes package')
+                vertices = stl_vertices(path)
+                vertices_si = [tuple(v * .001 for v in p) for p in vertices]
+                checks.close(name + ' ' + kind + ' raw root-frame STL bounds in meters', bounds(vertices_si), expected_bounds)
+                check_box_mesh(vertices_si, boxes, checks, name + ' ' + kind)
+                scale = _vector(mesh, 'scale', '1 1 1')
+                origin = _origin(geometry.find('origin'))
+                scaled = [tuple(a*b for a, b in zip(p, scale)) for p in vertices]
+                mesh_data[name, kind].append((origin, scaled))
+                world = compose(frames[name], origin)
+                actual_bounds = bounds(transform(world, p) for p in scaled)
+                checks.close(name + ' zero-pose ' + kind + ' world bounds', actual_bounds, expected_bounds)
         mass, center, tensor = box_physics(boxes)
         inertial = link.find('inertial')
         inertial_origins[name] = _origin(inertial.find('origin'))
@@ -495,14 +508,18 @@ def verify_package(package, boxes_by_link, cad_bounds, expected_joints, checks=N
     for label, positions in states:
         moved_frames = _urdf_frames(joints, positions)
         expected_motion = _fixture_displacements(expected_joints, positions)
+        for name, zero_pose in frame_poses.items():
+            expected_pose = compose(expected_motion[name], zero_pose)
+            checks.close(label + ' ' + name + ' frame rotation', moved_frames[name][0], expected_pose[0])
+            checks.close(label + ' ' + name + ' frame translation', moved_frames[name][1], expected_pose[1])
         for name, boxes in boxes_by_link.items():
             displacement = expected_motion[name]
             expected_bounds = bounds(transform(displacement, p) for box in boxes for p in box_corners(box))
             for kind in ('visual', 'collision'):
-                origin, vertices = mesh_data[name, kind]
-                pose = compose(moved_frames[name], origin)
-                checks.close(label + ' ' + name + ' ' + kind + ' moved world bounds',
-                             bounds(transform(pose, p) for p in vertices), expected_bounds)
+                for origin, vertices in mesh_data[name, kind]:
+                    pose = compose(moved_frames[name], origin)
+                    checks.close(label + ' ' + name + ' ' + kind + ' moved world bounds',
+                                 bounds(transform(pose, p) for p in vertices), expected_bounds)
             expected_center = transform(displacement, box_physics(boxes)[1])
             actual_center = compose(moved_frames[name], inertial_origins[name])[1]
             checks.close(label + ' ' + name + ' moved world COM', actual_center, expected_center)
