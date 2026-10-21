@@ -5,8 +5,9 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
-from tools.verify_fusion_coverage import render_catalog, verify
+from tools.verify_fusion_coverage import main, render_catalog, verify
 
 
 class FusionCoverageTest(unittest.TestCase):
@@ -84,15 +85,24 @@ class FusionCoverageTest(unittest.TestCase):
             self.assertTrue(entry['sources'], entry['repository'])
 
     def test_unimplemented_case_without_checks_is_not_a_success(self):
-        result, report = self.run_case('--case', 'body-face-appearance')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(report['cases']['body-face-appearance']['offline_status'], 'not-covered')
-        self.assertFalse(report['offline_checks_passed'])
+        catalog = {'scope': 'probe', 'cases': [{'id': 'not-implemented',
+            'implementation': 'unimplemented', 'tests': []}]}
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('tools.verify_fusion_coverage.json.loads', return_value=catalog):
+                self.assertEqual(main(['--output', directory]), 1)
+            report = json.loads((Path(directory) / 'fusion-coverage.json').read_text())
+            self.assertEqual(report['cases']['not-implemented']['offline_status'], 'not-covered')
+            self.assertFalse(report['offline_checks_passed'])
 
     def test_rejection_checks_are_not_labeled_input_support(self):
-        result, report = self.run_case('--case', 'motion-links')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        case = report['cases']['motion-links']
+        catalog = {'scope': 'probe', 'cases': [{'id': 'rejection-probe',
+            'implementation': 'unimplemented', 'tests': [], 'diagnostic_tests': [
+                'tests.test_fusion_inputs.InputGapTest.test_active_motion_links_and_bodyless_constraint_frames_are_named']}]}
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('tools.verify_fusion_coverage.json.loads', return_value=catalog):
+                self.assertEqual(main(['--output', directory]), 0)
+            report = json.loads((Path(directory) / 'fusion-coverage.json').read_text())
+        case = report['cases']['rejection-probe']
         self.assertEqual(case['implementation'], 'unimplemented')
         self.assertEqual(case['checked_behavior'], 'rejection-only')
         self.assertEqual(case['tests'], [])

@@ -9,6 +9,11 @@ import math
 from ..utils import utils
 from ..utils import transforms as tf
 from ..utils import config as config_mod
+from ..utils.names import allocate_names, ExportedJoints
+from .Write import resolve_joint_limits
+from .generalized import SourceIdentity, MotionBinding, expand_motion
+from .coupling import read_motion_link, ExcludedMotion
+from ..utils import validate
 
 _MOTION_FIELDS = {
     'revolute': ('rotationAxisVector', 'rotationLimits', 'rotationValue', 1.0),
@@ -16,46 +21,42 @@ _MOTION_FIELDS = {
 }
 
 
-def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None):
+def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None, joint_records=None):
     """Extract SI poses and joint-frame axes, with limits relative to the design pose."""
 
     joints_dict = {}
     success = msg
     source_notes = [] if source_notes is None else source_notes
     config = config_mod.load_config(overrides=config)
-    sources = utils.link_sources(root, config=config) if sources is None else sources
+    joint_records = utils.root_joints(root, 'root inference and joint extraction') if joint_records is None else joint_records
+    sources = utils.link_sources(root, config=config, joint_records=joint_records) if sources is None else sources
     effort, velocity = config['effort'], config['velocity']
 
-    def iter_joints():
-        for joint in utils.collection_items(root.allJoints):
-            yield joint, False
-        for joint in utils.collection_items(root.allAsBuiltJoints):
-            yield joint, True
+    source_joints = [(joint, is_as_built) for joint, is_as_built in joint_records
+                     if not getattr(joint, 'isSuppressed', False)]
+    aliases = allocate_names([utils.joint_source_name(joint) for joint, _ in source_joints], 'joint')
+    native_inventory, macros, bindings = [], {}, {}
 
-    for joint, is_as_built in iter_joints():
-        if getattr(joint, 'isSuppressed', False):
-            continue
+    for joint, is_as_built in source_joints:
         joint_dict = {}
-        try:
-            occ_two = joint.occurrenceTwo
-            occ_one = joint.occurrenceOne
-        except Exception:
-            msg = joint.name + " doesn't reference two occurrences. Please set it and run again."
-            break
+        occ_two, occ_one = utils.joint_occurrences(joint)
         context = getattr(joint, 'assemblyContext', None)
-        prefix = getattr(context, 'fullPathName', '')
-        source_name = prefix + '+' + joint.name if prefix else joint.name
+        source_name = utils.joint_source_name(joint)
+        name = aliases[source_name]
+        inventory_entry = dict(joint=joint, name=name, context=context, status='selected')
+        native_inventory.append(inventory_entry)
         endpoints, errors = [], []
         for occurrence in (occ_two, occ_one):
             try:
                 endpoints.append(utils.link_name(occurrence, sources, context))
             except ValueError as error:
-                errors.append(str(error))
+                errors.append(error)
         if errors:
-            if len(errors) == 2 and all(error.startswith('CONSTRAINT_TARGET_EXCLUDED') for error in errors):
+            if len(errors) == 2 and all(str(error).startswith('CONSTRAINT_TARGET_EXCLUDED') for error in errors):
                 source_notes.append({'name': source_name, 'reason': 'All joint endpoints are excluded'})
+                inventory_entry['status'] = 'excluded'
                 continue
-            raise ValueError(source_name + ': ' + '; '.join(errors))
+            raise ValueError(source_name + ': ' + '; '.join(map(str, errors))) from errors[0]
         joint_dict['parent'], joint_dict['child'] = endpoints
         try:
             type_value = _joint_type_value(joint.jointMotion)
@@ -66,10 +67,16 @@ def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None)
         locked = getattr(joint, 'isLocked', False) and type_value != 0
         if joint_type is None and locked and type_value in _FUSION_JOINT_NAMES:
             joint_type = 'fixed'
+        generalized = joint_type is None and type_value in (3, 4, 5, 6) and not locked
+        if generalized and config.get('generalized_joints', 'reject') == 'decompose':
+            if type_value == 6 and config.get('ball_chart', 'reject') != 'export-local-rx-ry-rz':
+                raise ValueError('BALL_CHART_REQUIRED: %s requires explicit ball_chart=export-local-rx-ry-rz; '
+                                 'native Ball coordinates and enabled bounds remain blocked' % source_name)
+            joint_type = 'compound'
         if joint_type is None:
             fusion_name = _FUSION_JOINT_NAMES.get(type_value, str(type_value))
             msg = ('UNSUPPORTED_FUSION_JOINT_TYPE: ' + source_name + ' uses ' + fusion_name +
-                   '; generalized-joint decomposition is not implemented. Use Rigid, Revolute, or Slider joints.')
+                   '; select generalized_joints=decompose explicitly, or use Rigid, Revolute, or Slider joints.')
             break
         joint_dict['type'] = joint_type
 
@@ -102,12 +109,16 @@ def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None)
                     joint_dict['lower_limit'] = limits.minimumValue * scale - position
                 elif joint_type == 'revolute':
                     joint_dict['type'] = 'continuous'
+                    joint_dict['lower_limit'] = joint_dict['upper_limit'] = None
                 else:
                     raise ValueError('Slider joints need finite lower and upper limits')
             except Exception as error:
                 msg = joint.name + ' has invalid motion data: ' + str(error)
                 break
             joint_dict['_raw_axis'] = raw_axis
+            bindings[name] = (MotionBinding(SourceIdentity(utils._native(joint), context),
+                               10 if joint_type == 'revolute' else 11, name, position,
+                               'rad' if joint_type == 'revolute' else 'm'),)
 
         try:
             xyz_of_joint_cm = _resolve_joint_xyz_cm(joint, is_as_built)
@@ -130,14 +141,140 @@ def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None)
             joint_dict['axis'] = tf.normalize(tf.rotate_vector_by_mat3(raw_axis, tf.mat3_transpose(child_rotation)))
         joint_dict['effort'] = effort
         joint_dict['velocity'] = velocity
-        name = utils.sanitize_name(source_name)
-        if name in joints_dict:
-            raise ValueError('Duplicate joint identity: ' + name)
         joints_dict[name] = joint_dict
+        if generalized:
+            macros[name] = (joint, type_value, dict(joint_dict))
+    identifiers = {
+        'links': sources.identifier_mapping(),
+        'joints': {alias: identity for identity, alias in aliases.items() if alias in joints_dict},
+    }
     if msg == success:
         joints_dict = _rigid_attachments(root, joints_dict, sources, source_notes)
+        if not macros:
+            joints_dict = resolve_joint_limits(joints_dict, config)
+        elif set(macros).intersection(config.get('joint_limits', {})):
+            raise ValueError('DOF_SELECTOR: compound joint settings require exact generated DOF names')
+        else:
+            joints_dict = resolve_joint_limits(joints_dict, dict(config, joint_limits={n: v for n, v in
+                config.get('joint_limits', {}).items() if n in joints_dict}))
         joints_dict = _orient_outward(joints_dict, sources)
-    return joints_dict, msg
+        macro_tree, closing, loop_warnings = validate.detect_closing_joints(joints_dict)
+        source_poses = {name: list(_source_pose_cm(name, sources)) for name in sources}
+        for record in macro_tree.values():
+            if record['type'] != 'compound':
+                for index, value in zip((3, 7, 11), record['xyz']):
+                    source_poses[record['child']][index] = value * 100
+        frame_records, removed, generated_sources = {}, [], {}
+        occupied = set(sources) | set(joints_dict)
+        for name, (joint, type_value, original) in macros.items():
+            oriented = joints_dict[name]
+            xyz = [v * 100 for v in original['xyz']]
+            pivot = [1, 0, 0, xyz[0], 0, 1, 0, xyz[1], 0, 0, 1, xyz[2], 0, 0, 0, 1]
+            context = getattr(joint, 'assemblyContext', None)
+            expansion = expand_motion({3: 'cylindrical', 4: 'pin_slot', 5: 'planar', 6: 'ball'}[type_value],
+                joint.jointMotion, source=SourceIdentity(utils._native(joint), context), source_name=name,
+                source_path=utils.joint_source_name(joint), parent=original['parent'], child=original['child'],
+                parent_pose_cm=source_poses[original['parent']],
+                child_pose_cm=source_poses[original['child']], joint_pose_cm=pivot,
+                reverse=oriented.get('endpoint_reversed', False), occupied_names=occupied,
+                effort=effort, velocity=velocity)
+            bindings[name] = expansion.bindings
+            if name not in macro_tree:
+                records = {p.name: dict(type=p.type, lower_limit=p.lower_limit, upper_limit=p.upper_limit,
+                                       effort=p.effort, velocity=p.velocity) for p in expansion.primitives}
+                selected_settings = {n: v for n, v in config.get('joint_limits', {}).items() if n in records}
+                records = resolve_joint_limits(records, dict(config, joint_limits=selected_settings))
+                for entry in closing:
+                    if entry['joint'] == name:
+                        entry['removed_dofs'] = records
+                removed.extend(p.name for p in expansion.primitives)
+                removed.append(name)
+                continue
+            poses = {f.name: f.pose for f in expansion.frames}
+            coordinate_bindings = {binding.primitive: binding for binding in expansion.bindings}
+            for frame in expansion.frames:
+                frame_records[frame.name] = dict(kind='frame', source_path=frame.source_path,
+                    generated_from=name, current_pose={'xyz': list(frame.pose.xyz), 'rotation': list(frame.pose.rotation)})
+            for primitive in expansion.primitives:
+                binding = coordinate_bindings.get(primitive.name)
+                if primitive.child in poses:
+                    xyz_root = list(poses[primitive.child].xyz)
+                else:
+                    xyz_root = [v / 100 for v in source_poses[primitive.child][3:12:4]]
+                macro_tree[primitive.name] = dict(parent=primitive.parent, child=primitive.child,
+                    type=primitive.type, axis=list(primitive.axis), xyz=xyz_root,
+                    rpy=list(tf.rpy_from_mat3(primitive.origin.rotation)),
+                    lower_limit=primitive.lower_limit, upper_limit=primitive.upper_limit,
+                    effort=primitive.effort, velocity=primitive.velocity,
+                    source_motion=dict(source_joint=name, source_path=utils.joint_source_name(joint),
+                        coordinate=primitive.coordinate, parameterization=expansion.parameterization,
+                        native_motion_id=binding.motion_type if binding else None,
+                        current_position_si=binding.current_position_si if binding else None,
+                        unit=binding.unit if binding else None,
+                        endpoint_reversed=oriented.get('endpoint_reversed', False)))
+                generated_sources[primitive.name] = utils.joint_source_name(joint)
+                occupied.add(primitive.name)
+            occupied.update(poses)
+            del macro_tree[name]
+        removed.extend(entry['joint'] for entry in closing)
+        closing_names = set(removed) | {entry['joint'] for entry in closing}
+        joints_dict = resolve_joint_limits(macro_tree, dict(config, joint_limits={n: v for n, v in
+            config.get('joint_limits', {}).items() if n not in closing_names}))
+        native_inventory.extend(dict(joint=joint, name=utils.joint_source_name(joint),
+            context=getattr(joint, 'assemblyContext', None), status='suppressed')
+            for joint, _ in joint_records if getattr(joint, 'isSuppressed', False))
+        relations = _motion_relations(root, sources, native_inventory, bindings, source_notes, config)
+        result = ExportedJoints(joints_dict, identifiers)
+        result.frame_records = frame_records
+        result.motion_relations = relations
+        result.removed_joint_names = removed
+        result.closing_joints = closing
+        result.loop_warnings = loop_warnings
+        result.source_identifiers['joints'] = {alias: path for alias, path in identifiers['joints'].items()
+                                               if alias in joints_dict}
+        result.source_identifiers['joints'].update(generated_sources)
+        return result, msg
+    return ExportedJoints(joints_dict, identifiers), msg
+
+
+def _source_pose_cm(name, sources):
+    if name == 'base_link' or not hasattr(sources[name].owner, 'component'):
+        return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    matrix = utils.occurrence_matrix_array(sources[name].owner)
+    if matrix is None:
+        raise ValueError('LINK_FRAME_UNAVAILABLE: ' + name)
+    return matrix
+
+
+def _motion_relations(root, sources, inventory, bindings, notes, config):
+    if config.get('motion_links', 'reject') != 'mimic':
+        return []
+
+    def resolve(joint, context, motion_id):
+        native = utils._native(joint)
+        own_context = getattr(joint, 'assemblyContext', None)
+        anchor = own_context if own_context is not None else context
+        canonical_context = sources.resolve_context(anchor).owner if anchor is not None else None
+        candidates = [entry for entry in inventory
+                      if (utils._native(entry['joint']) is native or utils._native(entry['joint']) == native)
+                      and ((entry['context'] is None and canonical_context is None) or
+                           (entry['context'] is not None and canonical_context is not None and
+                            sources.resolve_context(entry['context']).owner is canonical_context))]
+        if len(candidates) != 1:
+            raise ValueError('MOTION_LINK_UNKNOWN_OR_AMBIGUOUS_JOINT: actual joint/context not in held inventory')
+        selected = candidates[0]
+        name = selected['name']
+        if selected['status'] == 'excluded':
+            raise ExcludedMotion('MOTION_LINK_SOURCE_EXCLUDED: ' + name)
+        if name not in bindings:
+            raise ValueError('MOTION_LINK_DOF_UNAVAILABLE: %s is fixed, locked, suppressed, or excluded' % name)
+        for binding in bindings[name]:
+            if binding.motion_type == motion_id:
+                return binding
+        raise ValueError('MOTION_COORDINATE_UNAVAILABLE: %s motion %d' % (name, motion_id))
+
+    return [read_motion_link(link, resolve, enclosing_context=context)
+            for link, context in utils.motion_link_inventory(root, sources)]
 
 
 # Fusion JointTypes enum values, see

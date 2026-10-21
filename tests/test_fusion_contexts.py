@@ -247,7 +247,7 @@ class ContextRegistryTest(unittest.TestCase):
                 relative = api_occurrence('module:1+assembly:1', 'relative-assembly')
                 relative.nativeObject = native
                 relative.assemblyContext = relative_module
-                clamp = group('container_clamp', [base, relative])
+                clamp = group('container_clamp', [base, relative, a, b])
                 clamp.assemblyContext = left
                 fixture, exported = design(root([base, left, module, container, a, b], groups=[clamp]))
                 destination = Path(directory) / 'containers_description'
@@ -262,7 +262,8 @@ class ContextRegistryTest(unittest.TestCase):
                     robot = ET.parse(destination / 'urdf/containers.xacro').getroot()
                     self.assertEqual([(j.find('parent').get('link'), j.find('child').get('link'))
                                       for j in robot.findall('joint')],
-                                     [('base_link', 'left_1_module_1_assembly_1_a_1'),
+                                     [('base_link', 'left_1_module_1_assembly_1'),
+                                      ('base_link', 'left_1_module_1_assembly_1_a_1'),
                                       ('base_link', 'left_1_module_1_assembly_1_b_1')])
 
 

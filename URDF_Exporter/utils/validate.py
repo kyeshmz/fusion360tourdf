@@ -8,6 +8,39 @@ joints_dict model: {joint_name: {parent, child, type, ...}}.
 
 import math
 import re
+from . import transforms as tf
+
+
+def _inertia_error(tensor):
+    scale = max(abs(value) for value in tensor)
+    if scale == 0:
+        return None
+    xx, yy, zz, xy, yz, xz = [value / scale for value in tensor]
+    matrix = [[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]]
+    # Symmetric Jacobi rotations avoid determinant underflow and repeated-root cancellation.
+    for _ in range(32):
+        p, q = max(((0, 1), (0, 2), (1, 2)), key=lambda pair: abs(matrix[pair[0]][pair[1]]))
+        off = matrix[p][q]
+        if abs(off) <= math.ulp(1.0):
+            break
+        angle = 0.5 * math.atan2(2 * off, matrix[q][q] - matrix[p][p])
+        c, s = math.cos(angle), math.sin(angle)
+        a, b = matrix[p][p], matrix[q][q]
+        matrix[p][p] = c*c*a - 2*s*c*off + s*s*b
+        matrix[q][q] = s*s*a + 2*s*c*off + c*c*b
+        matrix[p][q] = matrix[q][p] = 0.0
+        for k in range(3):
+            if k not in (p, q):
+                a, b = matrix[k][p], matrix[k][q]
+                matrix[k][p] = matrix[p][k] = c*a - s*b
+                matrix[k][q] = matrix[q][k] = s*a + c*b
+    low, middle, high = sorted(matrix[index][index] for index in range(3))
+    tolerance = 64 * math.ulp(1.0)
+    if low < -tolerance:
+        return 'must be positive semidefinite (negative principal moment)'
+    if high - middle - low > tolerance:
+        return 'violates principal-moment triangle inequalities'
+    return None
 
 
 def detect_closing_joints(joints_dict):
@@ -63,12 +96,25 @@ def validate_export(joints_dict, inertial_dict, config=None):
         if not isinstance(entry, dict):
             errors.append('Link %s has unreadable inertial data.' % name)
             continue
+        kind = entry.get('kind', 'physical')
+        if kind == 'frame':
+            physical_fields = {'mass', 'center_of_mass', 'inertia', 'color_rgba', 'bbox_center_m', 'bbox_size_m',
+                               'visual', 'collision', 'mesh', 'mesh_physics'}
+            if physical_fields.intersection(entry):
+                errors.append('Frame link %s must not contain physical or geometry data.' % name)
+            continue
+        if kind != 'physical':
+            errors.append('Link %s has unsupported kind %r.' % (name, kind))
         if not number(entry.get('mass')) or entry['mass'] <= 0:
             errors.append('Link %s needs finite positive mass.' % name)
         if not vector(entry.get('center_of_mass'), 3):
             errors.append('Link %s needs a finite center_of_mass vector.' % name)
         if not vector(entry.get('inertia'), 6) or any(v < 0 for v in entry['inertia'][:3]):
             errors.append('Link %s needs a finite inertia tensor with nonnegative diagonal.' % name)
+        else:
+            inertia_error = _inertia_error(entry['inertia'])
+            if inertia_error:
+                errors.append('Link %s inertia %s.' % (name, inertia_error))
         color = entry.get('color_rgba')
         if color is not None and (not vector(color, 4) or any(v < 0 or v > 1 for v in color)):
             errors.append('Link %s has invalid color_rgba.' % name)
@@ -76,6 +122,14 @@ def validate_export(joints_dict, inertial_dict, config=None):
             value = entry.get(key)
             if value is not None and (not vector(value, 3) or (key == 'bbox_size_m' and any(v <= 0 for v in value))):
                 errors.append('Link %s has invalid %s.' % (name, key))
+        if entry.get('mesh_physics'):
+            warnings.append('Link %s uses explicit caller mesh physics, not native Fusion mass. '
+                            'See mesh_physics provenance.' % name)
+            if any(item['policy'] == 'caller-supplied-central-SI-physics' for item in entry['mesh_physics']):
+                warnings.append('Link %s supplied properties deliberately override geometry-derived physics. '
+                                'Surface thickness and density are not inferred.' % name)
+            if (config or {}).get('collision_method') == 'primitive_box' and entry.get('bbox_size_m') is None:
+                errors.append('Link %s has no positive-volume mesh bounds for primitive_box; use visual collision mode for surfaces.' % name)
     for joint_name, joint in joints_dict.items():
         if not isinstance(joint_name, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', joint_name):
             errors.append('Unsafe joint name: %r.' % joint_name)
@@ -103,7 +157,7 @@ def validate_export(joints_dict, inertial_dict, config=None):
             errors.append('Joint %s needs a finite rpy vector.' % joint_name)
         if jtype in ('revolute', 'continuous', 'prismatic'):
             axis = joint.get('axis')
-            if not vector(axis, 3) or sum(a * a for a in axis) < 1e-24:
+            if not vector(axis, 3) or not any(tf.normalize(axis)):
                 errors.append('Joint %s (%s) has a zero axis or nonfinite axis vector.' % (joint_name, jtype))
             for key in ('effort', 'velocity'):
                 value = joint.get(key, (config or {}).get(key, 100.0))

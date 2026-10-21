@@ -17,6 +17,8 @@ class Body:
     def __init__(self, name, x, mass=1, visible=True):
         self.name = name
         self.isVisible = visible
+        self.isValid = True
+        self.isSolid = True
         self.boundingBox = types.SimpleNamespace(
             minPoint=FakePoint([x - 1, -1, -1]), maxPoint=FakePoint([x + 1, 1, 1]))
         self.properties = types.SimpleNamespace(mass=mass, centerOfMass=FakePoint([x, 0, 0]),
@@ -43,6 +45,7 @@ class Body:
 
 def occurrence(path, bodies=(), *, component=None, matrix=None):
     return types.SimpleNamespace(name=path.split('+')[-1], fullPathName=path,
+        isValid=True,
         component=types.SimpleNamespace(name=component or path.split(':')[0], motionLinks=[]),
         bRepBodies=FakeCollection(bodies), meshBodies=[], isVisible=True,
         transform2=FakeMatrix(matrix or identity_at([0, 0, 0])), isGrounded=False)
@@ -183,13 +186,13 @@ class DirectBodyTest(unittest.TestCase):
                 entry.export_design(bad, Path(directory) / 'bad_description')
             self.assertEqual(sorted(p.name for p in Path(directory).iterdir()), ['body_description'])
 
-    def test_visible_mesh_bodies_are_named_unimplemented_not_silently_dropped(self):
+    def test_visible_mesh_bodies_require_named_explicit_physics_not_silently_dropped(self):
         component = root([occurrence('hybrid:1', [Body('solid', 0)])])
         component.allOccurrences[0].meshBodies = [types.SimpleNamespace(name='scan', isVisible=True)]
-        with self.assertRaisesRegex(ValueError, 'MESH_BODY_NOT_IMPLEMENTED.*hybrid:1.*scan'):
+        with self.assertRaisesRegex(ValueError, 'MESH_PHYSICS_REQUIRED.*hybrid:1.*scan'):
             utils.link_sources(component)
         component.allOccurrences[0].bRepBodies = []
-        with self.assertRaisesRegex(ValueError, 'MESH_BODY_NOT_IMPLEMENTED.*hybrid:1.*scan'):
+        with self.assertRaisesRegex(ValueError, 'MESH_PHYSICS_REQUIRED.*hybrid:1.*scan'):
             utils.link_sources(component)
 
 
@@ -375,9 +378,12 @@ class RigidConstraintTest(ExportFixture, unittest.TestCase):
         container = occurrence('assembly:1')
         a = occurrence('assembly:1+a:1', [Body('a', 10)])
         b = occurrence('assembly:1+b:1', [Body('b', 20)])
-        robot, _ = self.export(root([base, container, a, b], groups=[group('assembly_clamp', [base, container])]))
-        self.assertEqual([j.get('type') for j in robot.findall('joint')], ['fixed', 'fixed'])
-        self.assertEqual(len(robot.findall('link')), 3)
+        robot, _ = self.export(root([base, container, a, b], groups=[group('assembly_clamp', [base, container, a, b])]))
+        self.assertEqual([j.get('type') for j in robot.findall('joint')], ['fixed'] * 3)
+        self.assertEqual(len(robot.findall('link')), 4)
+        self.assertEqual(list(robot.find("link[@name='assembly_1']")), [])
+        for name in ('base_link', 'assembly_1_a_1', 'assembly_1_b_1'):
+            self.assertIsNotNone(robot.find("link[@name='%s']/inertial/mass" % name))
 
     def test_group_container_cannot_silently_drop_hidden_physical_descendants(self):
         base = occurrence('base:1', [Body('base', 0)], component='base_link')
@@ -385,7 +391,7 @@ class RigidConstraintTest(ExportFixture, unittest.TestCase):
         a = occurrence('assembly:1+a:1', [Body('a', 10)])
         b = occurrence('assembly:1+b:1', [Body('b', 20)])
         b.isVisible = False
-        component = root([base, container, a, b], groups=[group('partly_hidden', [base, container])])
+        component = root([base, container, a, b], groups=[group('partly_hidden', [base, container, a, b])])
         with self.assertRaisesRegex(ValueError, 'CONSTRAINT_TARGET_EXCLUDED.*partly_hidden.*assembly:1.b:1'):
             self.export(component)
 
@@ -396,14 +402,15 @@ class RigidConstraintTest(ExportFixture, unittest.TestCase):
         left.nativeObject = right.nativeObject = native
         a = occurrence('left:1+assembly:1+a:1', [Body('a', 10)])
         b = occurrence('right:1+assembly:1+b:1', [Body('b', 20)])
-        clamp = group('context_clamp', [base, native])
+        clamp = group('context_clamp', [base, native, a])
         component = root([base, left, right, a, b], joints=[fixed('other_mount', b, base)], groups=[clamp])
         with self.assertRaisesRegex(ValueError, 'context_clamp.*AMBIGUOUS_CONSTRAINT_TARGET.*assembly:1'):
             self.export(component)
         clamp.assemblyContext = types.SimpleNamespace(fullPathName='left:1')
         robot, _ = self.export(component)
-        self.assertEqual(len(robot.findall('link')), 3)
-        self.assertEqual([j.get('type') for j in robot.findall('joint')], ['fixed', 'fixed'])
+        self.assertEqual(len(robot.findall('link')), 4)
+        self.assertEqual([j.get('type') for j in robot.findall('joint')], ['fixed'] * 3)
+        self.assertEqual(list(robot.find("link[@name='left_1_assembly_1']")), [])
 
     def test_suppressed_group_does_not_remove_active_dof(self):
         base, a, _, _ = self.assembly()
@@ -442,13 +449,23 @@ class InputGapTest(ExportFixture, unittest.TestCase):
         frame = occurrence('reference_frame:1')
         component.allOccurrences.append(frame)
         component.allJoints = [fixed('frame_mount', frame, base)]
-        with self.assertRaisesRegex(ValueError, 'frame_mount.*BODYLESS_FRAME_NOT_IMPLEMENTED.*reference_frame'):
+        with self.assertRaisesRegex(ValueError, 'DISCONNECTED_LINKS.*arm_1'):
             self.export(component)
+        component.allJoints.append(hinge('drive', child, base))
+        robot, destination = self.export(component)
+        self.assertEqual(list(robot.find("link[@name='reference_frame_1']")), [])
+        self.assertEqual(robot.find("joint[@name='frame_mount']/child").get('link'), 'reference_frame_1')
+        self.assertEqual(robot.find("joint[@name='drive']").get('type'), 'continuous')
+        self.assertFalse((destination / 'meshes/reference_frame_1.stl').exists())
 
     def test_bodyless_design_root_constraint_is_an_explicit_input_gap(self):
         child = occurrence('arm:1', [Body('arm', 10)])
-        with self.assertRaisesRegex(ValueError, 'root_mount.*BODYLESS_FRAME_NOT_IMPLEMENTED.*design_root'):
-            self.export(root([child], joints=[fixed('root_mount', child, None)]))
+        robot, destination = self.export(root([child], joints=[fixed('root_mount', child, None)]))
+        self.assertEqual(list(robot.find("link[@name='base_link']")), [])
+        self.assertEqual(robot.find('joint/parent').get('link'), 'base_link')
+        self.assertEqual(robot.find('joint/child').get('link'), 'arm_1')
+        self.assertEqual(float(robot.find("link[@name='arm_1']/inertial/mass").get('value')), 1)
+        self.assertFalse((destination / 'meshes/base_link.stl').exists())
 
     def test_locked_joint_exports_fixed_current_pose_and_original_type_in_sidecar(self):
         base = occurrence('base:1', [Body('base', 0)], component='base_link')

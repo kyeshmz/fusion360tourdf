@@ -64,6 +64,7 @@ def identity_at(xyz):
 
 class FakeOccurrence:
     def __init__(self, name, component_name, xyz):
+        self.isValid = True
         self.name = name
         self.component = types.SimpleNamespace(name=component_name)
         self.transform2 = FakeMatrix(identity_at(xyz))
@@ -77,6 +78,7 @@ class FakeJointMotion:
 
 class FakeJoint:
     def __init__(self, name, occ_one, occ_two, one_xyz, two_xyz):
+        self.isValid = True
         self.name = name
         self.occurrenceOne = occ_one
         self.occurrenceTwo = occ_two
@@ -187,9 +189,9 @@ class ExporterLogicTest(unittest.TestCase):
         }
         inertial_dict = {
             'base_link': {'center_of_mass': [0, 0, 0.5], 'mass': 1.0,
-                          'inertia': [0.1] * 6},
+                          'inertia': [0.1, 0.1, 0.1, 0, 0, 0]},
             'link1': {'center_of_mass': [0, 0, 1.5], 'mass': 2.0,
-                      'inertia': [0.2] * 6},
+                      'inertia': [0.2, 0.2, 0.2, 0, 0, 0]},
         }
         with tempfile.TemporaryDirectory() as tmp:
             save_dir = Path(tmp) / 'bot_description'
@@ -273,12 +275,16 @@ class MeshExtractionTest(unittest.TestCase):
             self.assertEqual([o.unitType for o in exports], [1, 1])
             self.assertEqual(targets['wheel_2'].read_bytes()[84:], mesh_bytes()[84:])
 
-    def test_duplicate_sanitized_identities_are_rejected(self):
-        for occurrences in ([self.occurrence('wheel:1'), self.occurrence('wheel_1')],
-                            [self.occurrence('a', 'base_link'), self.occurrence('b', 'base_link')]):
-            design, _ = self.design(occurrences)
-            with self.assertRaises(ValueError):
-                utils.link_sources(design.rootComponent)
+    def test_alias_allocation_does_not_hide_ambiguous_root_identity(self):
+        occurrences = [self.occurrence('wheel:1'), self.occurrence('wheel_1')]
+        design, _ = self.design(occurrences)
+        sources = utils.link_sources(design.rootComponent, config={'root_occurrence': 'wheel:1'})
+        self.assertEqual(set(sources), {'base_link', 'wheel_1'})
+        self.assertIs(sources['base_link'].owner, occurrences[0])
+        self.assertIs(sources['wheel_1'].owner, occurrences[1])
+        design, _ = self.design([self.occurrence('a', 'base_link'), self.occurrence('b', 'base_link')])
+        with self.assertRaisesRegex(ValueError, 'ROOT_AMBIGUOUS'):
+            utils.link_sources(design.rootComponent)
 
     def test_nested_full_paths_are_shared_by_extraction_and_export(self):
         one, two = self.occurrence('wheel:1'), self.occurrence('wheel:1')
@@ -315,7 +321,7 @@ class MeshExtractionTest(unittest.TestCase):
         def body_at(x):
             prop = types.SimpleNamespace(mass=1, centerOfMass=FakePoint([x, 0, 0]),
                 getXYZMomentsOfInertia=lambda: (True, 10000, 20000, 30000, 0, 0, 0))
-            return types.SimpleNamespace(getPhysicalProperties=lambda _: prop)
+            return types.SimpleNamespace(isValid=True, isSolid=True, getPhysicalProperties=lambda _: prop)
 
         design, _ = self.design([], [body_at(-100), body_at(100)])
         design.rootComponent.getPhysicalProperties = lambda _: self.fail('whole assembly mass was requested')
@@ -329,6 +335,8 @@ class MeshExtractionTest(unittest.TestCase):
         entry = importlib.import_module('URDF_Exporter.URDF_Exporter')
         design, _ = self.design([], bodies=[object()], fail=True)
         design.rootComponent.name = 'bot'
+        design.rootComponent.allJoints = []
+        design.rootComponent.allAsBuiltJoints = []
         messages = []
         ui = types.SimpleNamespace(messageBox=lambda text, title: messages.append(text))
         app = types.SimpleNamespace(userInterface=ui, activeProduct=design)

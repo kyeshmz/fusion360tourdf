@@ -195,7 +195,15 @@ class GroundingExportTest(unittest.TestCase):
                 child = grounded('assembly:1+tool:1', 20, parent=True)
                 owners = [base, child] + ([container] if include_parent else [])
                 self.reject(root(owners),
-                    r'BODYLESS_FRAME_GROUNDING_NOT_IMPLEMENTED.*assembly:1\+tool:1.*assembly:1')
+                    r'DISCONNECTED_RIGID_GROUP.*assembly_1_tool_1' if include_parent else
+                    r'UNRESOLVABLE_GROUNDING_PARENT.*assembly:1\+tool:1.*assembly:1')
+                if include_parent:
+                    robot, _ = self.export(root(owners, joints=[hinge('frame_drive', container, base)]))
+                    self.assertEqual(list(robot.find("link[@name='assembly_1']")), [])
+                    self.assert_dofs(robot, 1)
+                    attachment = next(j for j in robot.findall('joint') if j.get('type') == 'fixed')
+                    self.assertEqual(attachment.find('parent').get('link'), 'assembly_1')
+                    self.assertEqual(attachment.find('child').get('link'), 'assembly_1_tool_1')
 
     def test_dual_bodyless_flags_preserve_both_physical_and_world_relationships(self):
         base = grounded('frame:1', 10, world=True, component='base_link')

@@ -75,6 +75,7 @@ class FakeMatrix:
 
 class FakeOccurrence:
     def __init__(self, name, component_name, matrix, visible=True, bodies=1):
+        self.isValid = True
         self.name = name
         self.component = types.SimpleNamespace(
             name=component_name,
@@ -102,6 +103,7 @@ class FakeJointMotion:
 
 class FakeJoint:
     def __init__(self, name, occ_one, occ_two, one_xyz, two_xyz, motion=None):
+        self.isValid = True
         self.name = name
         self.occurrenceOne = occ_one
         self.occurrenceTwo = occ_two
@@ -325,7 +327,7 @@ class WritersTest(unittest.TestCase):
                           'color_rgba': (1.0, 0.0, 0.0, 1.0),
                           'bbox_center_m': [0, 0, 0.5], 'bbox_size_m': [0.2, 0.2, 1.0]},
             'arm': {'center_of_mass': [0, 0, 1.5], 'mass': 2.0,
-                    'inertia': [0.2] * 6, 'color_rgba': None,
+                    'inertia': [0.2, 0.2, 0.2, 0, 0, 0], 'color_rgba': None,
                     'bbox_center_m': [0, 0, 1.5], 'bbox_size_m': [0.1, 0.1, 1.0]},
         }
         return joints, inertial

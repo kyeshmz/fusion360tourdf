@@ -2,8 +2,9 @@
 
 ## Assembly and topology
 
-- One visible component occurrence represents one link. Repeated instances
-  need distinct occurrence identities and distinct posed mesh files.
+- One selected occurrence context represents one physical or frame-only link.
+  Repeated instances retain distinct raw context identities and collision-safe
+  ASCII aliases without renaming the CAD source.
 - Name the chassis `base_link` or select an exact `root_occurrence`. Root-owned
   bodies can supply a synthetic base without exporting descendants twice.
 - The exporter orients edges outward from the chosen root. Component1 and
@@ -14,9 +15,10 @@
 - Every exported link must be reachable from `base_link`. Disconnected
   geometry must not disappear silently.
 - Ground To Parent is a fixed constraint, not just a root-selection hint.
-  Physical parents and proven fixed ancestry are handled. Missing bodyless
-  parent/world frames remain explicit input gaps. Export does not clear flags
-  or weld geometry to an unproven world anchor.
+  Required visible empty parents become explicit frame-only links. Unresolved
+  or invalid references fail closed. Export does not clear flags or weld
+  geometry to an unproven world anchor. RigidGroup.occurrences is authoritative;
+  container membership does not imply descendant membership.
 - URDF represents a tree. Additional loop-closing joints belong in
   `config/robot_data.yaml`, not in the URDF tree. The sidecar does not enforce
   physical constraints.
@@ -33,6 +35,12 @@
 - Local centers of mass and inertia tensors must describe the same link
   frame as the joint tree. Rotation matters as well as translation.
 - STL coordinates use millimeters. URDF mesh scale converts them to meters.
+- Explicit frame-only links have no inertia, mass, visual, collision or mesh.
+  Physical links still require valid positive CAD physics and geometry.
+- Optional convex decomposition uses conservative convex voxel cells from one
+  validated closed embedded STL shell. It does not modify CAD mass/inertia or
+  visual STL bytes. Multiple shells and cavities reject. Resolution/error
+  bounds and strict budgets are recorded; simulation cost is not established.
 - Set both limits for a bounded revolute or slider joint. An unbounded
   revolute joint is continuous. A slider needs finite travel bounds.
 - The current assembly pose becomes URDF joint zero. Bounded limits subtract

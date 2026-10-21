@@ -1,6 +1,6 @@
 # Prepare and configure a Fusion export
 
-Prepare a connected solid assembly, select its root, and export a fresh ROS 2 description package. This guide describes the assembly, frame, and configuration rules behind the [README workflow](../README.md#export-in-fusion).
+Prepare the selected assembly, choose its root, and export a fresh ROS 2 description package. The default uses connected BRep solids; the explicit input policies below also cover selected mesh geometry. This guide explains the [README workflow](../README.md#export-in-fusion).
 
 ## Choose the exported assembly
 
@@ -8,7 +8,7 @@ Export reads the active design’s root assembly, not only the currently activat
 
 ### Select the root
 
-Set `root_occurrence` to an exact occurrence path when you need an explicit root. Use `design_root` to select direct root bodies rather than a component occurrence.
+Set `root_occurrence` to an exact occurrence path when you need an explicit root. Use `design_root` for the design-root context, including a legitimately referenced bodyless root. Selected frame-only contexts receive no fabricated mass or geometry; see [frame links](frame-links.md).
 
 Without configuration, root selection prefers these candidates in order:
 
@@ -31,17 +31,17 @@ Check the following conditions:
 
 - Keep each repeated instance’s full occurrence identity and posed mesh target.
 - Export only each link’s selected direct bodies, not its descendants a second time.
-- Avoid names that collide after unsafe characters become underscores; collisions stop export rather than overwrite files.
+- Keep source names and full contextual identities. Unicode and sanitized-name collisions receive deterministic portable aliases; genuinely duplicate or ambiguous identities still stop export. See the [identifier policy](identifier-policy.md).
 - Use root-owned BRep solids for imported chassis geometry when a separate holding component is unnecessary.
 - Connect every selected physical link to the root. Nearby but disconnected parts are not automatically welded.
 
-Ordinary and as-built rigid, revolute, and slider joints are the maintained joint types. An unbounded revolute becomes continuous; a slider requires finite lower and upper limits. Set both bounds or neither where the joint type permits it.
+Ordinary and as-built rigid, revolute, and slider joints work by default. An unbounded revolute becomes continuous; a slider requires finite lower and upper limits. Opt-in [generalized decomposition](generalized-joints.md) adds supported cylindrical, pin-slot, planar, and explicitly export-local unbounded Ball coordinates. Native bounded Ball coordinates remain unsupported. Never replace missing required travel bounds with arbitrary large numbers.
 
 The current design pose becomes URDF joint zero. The exporter subtracts the current driven position from bounds to retain the physical travel range.
 
 Hiding a joint marker does not suppress its constraint. Suppressing a joint changes the mechanism; locking a joint exports it as fixed at the current pose, with its original motion recorded in the sidecar.
 
-Rigid groups become fixed relationships or produce an explicit conflict. Ground To Parent also defines a fixed relationship. Physical parents and proven fixed ancestry are supported; unresolved bodyless/world frames fail rather than receive guessed connections.
+Rigid groups use their actual occurrence membership or produce an explicit conflict. Ground To Parent also defines a fixed relationship. Referenced frame-only links and proven fixed ancestry are supported; containment alone never welds descendants. Unresolved, hidden, or invalid required references fail rather than receive guessed connections.
 
 ## Preserve history and source state
 
@@ -76,11 +76,13 @@ Assign physical materials and inspect mass properties in Fusion. Visual appearan
 
 ### Appearance fidelity
 
-Combined STL output has one flat appearance color per link. It does not preserve distinct body/face materials or textures.
+Default `visual_materials = "legacy"` output uses combined STL and one flat appearance color per link. That default does not preserve distinct body/face materials or textures.
 
 Extraction recognizes modern primary colors and known legacy `appearanceProperties` colors. Native RGB and opacity values are bytes, not normalized fractions. A supported flat color can remain usable when an appearance also has texture metadata, but the texture pattern is not exported.
 
 If no supported flat color is available, the writer uses silver rather than another material’s color. Color fallback does not change density or mass. The Blender README renders use neutral preview shading rather than testing this appearance policy.
+
+Explicit `strict` and lossy `diffuse-subset` modes retain supported per-face diffuse RGBA, PNG/JPEG images, and supplied UVs in portable OBJ/MTL assets. `visual_meshes = "per_body"` adds separate body files and visuals without splitting the physical link. Read the [visual asset policies and limits](visual-assets.md); arbitrary shaders, procedural baking, ancestor overrides, and native render equivalence are not implied.
 
 ## Configure the exporter
 
@@ -99,12 +101,28 @@ root_occurrence = ""
 | Option | Behavior |
 | --- | --- |
 | `mesh_refinement` | `low`, `medium`, or `high` Fusion tessellation; higher detail increases mesh size |
-| `collision_method` | `visual` reuses detailed meshes; `primitive_box` uses body bounds where available and otherwise retains mesh collision |
+| `collision_method` | `visual` reuses detailed meshes; `primitive_box` requests available body bounds; `convex_decomposition` and `convex_hull` create separate collision assets with explicit source/resource limits |
 | `effort` | Positive finite default joint effort, in N·m or N according to joint type |
 | `velocity` | Positive finite default joint velocity, in rad/s or m/s according to joint type |
 | `root_occurrence` | Empty for automatic selection, an exact source occurrence path, or `design_root` |
 
+Use the dedicated references for advanced settings and opt-in modes:
+
+| Options | Reference |
+| --- | --- |
+| `joint_limits` | [Per-joint effort/velocity and exact exported selectors](joint-settings.md) |
+| `generalized_joints`, `ball_chart` | [Primitive decomposition and coordinate/bound limitations](generalized-joints.md) |
+| `motion_links` | [Affine mimic relations, feasible limits, and independent commands](motion-coupling.md) |
+| `mesh_physics` | [Explicit density or supplied central SI physics](mesh-inputs.md); no inferred density or surface thickness |
+| `visual_materials`, `visual_meshes` | [Strict/subset appearance and combined/per-body files](visual-assets.md) |
+| `convex_decomposition`, `convex_hull` | [Conservative convex cells](mesh-geometry.md) versus [one true hull and its source policies](convex-hull.md) |
+| `output_rotation`, `output_rotation_preset`, `frame_convention`, `minimum_principal_inertia` | [Output reference, DH-friendly placement, and explicit spectral floors](export-policies.md) |
+
+Keep the detailed defaults unless the selected policy fits the model. A supplied-physics surface without positive-volume bounds cannot use `primitive_box`; no thickness is invented. A hull can intentionally fill gaps, whereas density integration and convex-cell decomposition retain their stricter source-topology requirements. New input modes have generated-fixture checks, not original-CAD or universal native Fusion proof.
+
 Unknown keys, malformed values, and nonfinite limits abort export. Old `ros_version`, `use_legacy_copy`, transmission, and control switches are invalid. There is no destructive-copy mode to enable as a workaround.
+
+Finite inputs can still yield an unrepresentable derived origin. Numeric XML and JSON fields fail closed rather than publish `inf` or `NaN`. Axis normalization avoids squared-norm overflow, and checked affine initialization preserves representable cancelling mimic results. A range failure may occur during staging, but never publishes a partial package.
 
 ## Publish a fresh package
 
@@ -112,7 +130,7 @@ The UI uses the first whitespace-delimited word of the root/design name, sanitiz
 
 Choose a fresh destination. Existing output is not overwritten, cancellation creates no package, and required mesh validation must pass before staged files become the published package. Do not run concurrent exports into the same destination.
 
-The self-contained xacro and STL meshes describe the selected robot. Movable robots receive controller configuration and a mock-control launch file; fixed-only robots do not need an empty hardware system.
+The plain URDF and self-contained xacro reference package-contained meshes and any selected image/material assets. Copy the complete package, not only its XML or STL files. Movable robots receive controller configuration and a mock-control launch file; fixed-only robots do not need an empty hardware system.
 
 `config/robot_data.yaml` records topology, metadata, warnings, and removed loop-closing constraints. JSON formatting in these `.yaml` files is valid YAML. A closure sidecar records information but does not enforce the closed mechanism’s motion.
 
@@ -128,9 +146,10 @@ Use the named error to find the source condition instead of changing the design 
 | A link is disconnected | Add the intended constraint or exclude the geometry deliberately. Spatial proximity is not a fixed connection. |
 | A hidden joint marker still exports | Suppress the joint only if you intend to remove its mechanics. Hiding its marker is not suppression. |
 | A mechanism depends on hidden geometry | Make the required endpoint visible or change the selection; do not silently drop one side of a constraint. |
-| Grounding has no representable parent or world anchor | Inspect the fixed ancestry and root choice. Bodyless/world frame gaps require supported input or an implementation change, not cleared grounding flags. |
-| A duplicate identity or mesh target appears | Inspect sanitized occurrence paths rather than component names alone. |
+| Grounding has no representable parent or world anchor | Inspect actual fixed ancestry, root choice, and unavailable references. Keep grounding flags; containment alone does not prove a fixed connection. |
+| A duplicate identity or mesh target appears | Inspect full raw occurrence identities and `source_identifiers`; output aliases do not resolve source endpoints. |
 | Mass or inertia is invalid | Check solids, material density, units, and physical properties. Mesh-only inputs require a validated physical-property policy. |
+| `BREP_SURFACE_PHYSICS_UNSUPPORTED` names a body | The selected BRep is non-solid. The frontend rejects it rather than infer mass/thickness or hide it beside a solid; see the [surface-BRep policy](mesh-inputs.md#surface-brep-policy). |
 | A joint or motion link is unsupported | Consult the [input matrix](fusion-coverage.md); do not reinterpret rejection as preserved motion. |
 | The output directory already exists | Choose a fresh name and preserve the previous package. |
 | Scale or placement is wrong | Compare a known dimension against Fusion and Blender. Do not compensate by manually offsetting meshes. |

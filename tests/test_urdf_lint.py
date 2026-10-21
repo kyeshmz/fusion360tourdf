@@ -49,10 +49,10 @@ class LinterTest(unittest.TestCase):
         }
         inertial = {
             'base_link': {'center_of_mass': [0, 0, 0.5], 'mass': 1.0,
-                          'inertia': [0.1] * 6, 'color_rgba': None,
+                          'inertia': [0.1, 0.1, 0.1, 0, 0, 0], 'color_rgba': None,
                           'bbox_center_m': None, 'bbox_size_m': None},
             'arm': {'center_of_mass': [0, 0, 1.5], 'mass': 2.0,
-                    'inertia': [0.2] * 6, 'color_rgba': None,
+                    'inertia': [0.2, 0.2, 0.2, 0, 0, 0], 'color_rgba': None,
                     'bbox_center_m': None, 'bbox_size_m': None},
         }
         with tempfile.TemporaryDirectory() as tmp:

@@ -10,7 +10,7 @@ from .utils import config as config_mod
 from .core import Link, Joint, Write
 
 
-def export_design(design, destination, *, config=None):
+def export_design(design, destination, *, config=None, cancelled=None):
     """Extract the current Fusion pose and publish a fresh ROS 2 package."""
     destination = Path(destination).absolute()
     if not re.fullmatch(r'[a-z][a-z0-9_]*_description', destination.name):
@@ -20,20 +20,27 @@ def export_design(design, destination, *, config=None):
     robot_name = destination.name[:-len('_description')]
     config = config_mod.load_config(overrides=config)
     root = design.rootComponent
-    sources = utils.link_sources(root, config=config)
+    joint_records = utils.root_joints(root, 'root inference and joint extraction')
+    sources = utils.link_sources(root, config=config, joint_records=joint_records, cancelled=cancelled)
     success = 'ok'
     source_notes = []
-    joints, message = Joint.make_joints_dict(root, success, config=config, sources=sources, source_notes=source_notes)
+    joints, message = Joint.make_joints_dict(root, success, config=config, sources=sources,
+                                           source_notes=source_notes, joint_records=joint_records)
     if message != success:
         raise ValueError(message)
     inertial, message = Link.make_inertial_dict(sources, success)
     if message != success:
         raise ValueError(message)
+    inertial.update(getattr(joints, 'frame_records', {}))
+    if config.get('visual_materials', 'legacy') != 'legacy':
+        source_notes.append({'name': 'visual appearance', 'source': 'selected direct native face snapshots',
+            'reason': 'Ancestor appearance precedence and inherited visibleOpacity are not live-Fusion verified. '
+                      'Only the supplied occurrence override and current face/body appearances are read.'})
     if source_notes:
         inertial['base_link']['source_notes'] = source_notes
-    return Write.write_ros2_package(destination, robot_name, joints, inertial,
-        write_meshes=lambda targets: utils.export_stl(design, targets, config=config, sources=sources),
-        config=config)
+    return Write.write_ros2_package(destination, robot_name, joints, inertial, cancelled=cancelled,
+        write_meshes=lambda targets: utils.export_stl(design, targets, config=config, sources=sources, cancelled=cancelled),
+        config=config, visual_assets=utils.collect_visual_assets(sources, config))
 
 
 def run(context):
