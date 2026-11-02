@@ -34,7 +34,7 @@ def root_joints(root, phase):
     for attribute, is_as_built in (('allJoints', False), ('allAsBuiltJoints', True)):
         try:
             collection = getattr(root, attribute)
-            count = len(collection) if isinstance(collection, (list, tuple)) else collection.count
+            count = len(collection) if hasattr(type(collection), '__len__') else collection.count
             if not isinstance(count, int) or count < 0:
                 raise ValueError('Invalid joint collection count: %r' % (count,))
             items = collection_items(collection)

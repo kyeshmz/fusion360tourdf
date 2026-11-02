@@ -46,6 +46,17 @@ class ShortIterator(IndexedCollection):
         return iter(self.items[:1])
 
 
+class SizedVector:
+    def __init__(self, items):
+        self.items = items
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, index):
+        return self.items[index]
+
+
 class UnreadableCount:
     def __init__(self, items, error):
         self.items = items
@@ -154,12 +165,12 @@ class JointDiscoveryTest(unittest.TestCase):
                         'JOINT_COLLECTION_UNAVAILABLE.*' + attribute, cause=error)
 
     def test_ordinary_as_built_and_indexed_collections_preserve_complete_root_inference(self):
-        for indexed in (False, True):
+        for kind in (list, IndexedCollection, SizedVector):
             component, joints = self.assembly(inferred=True)
-            component.allJoints = IndexedCollection(joints[:1]) if indexed else joints[:1]
-            component.allAsBuiltJoints = IndexedCollection(joints[1:]) if indexed else joints[1:]
+            component.allJoints = kind(joints[:1])
+            component.allAsBuiltJoints = kind(joints[1:])
             fixture, exported = design(component)
-            with self.subTest(indexed=indexed), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(kind=kind.__name__), tempfile.TemporaryDirectory() as directory:
                 package = importlib.import_module('URDF_Exporter.URDF_Exporter').export_design(
                     fixture, Path(directory) / 'joints_description')
                 robot = ET.parse(package / 'urdf/joints.xacro').getroot()
