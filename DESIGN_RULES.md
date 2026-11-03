@@ -24,8 +24,10 @@
   physical constraints.
 - The same selected direct bodies supply meshes and physical properties.
   Hiding a required constraint endpoint produces a named error rather than
-  silently changing the mechanism. Hiding only a joint marker does not suppress
-  that joint. Full context identity is retained even for excluded occurrences.
+  silently changing the mechanism. Excluding it through `exclude_occurrences`
+  or an `include_occurrences` list drops the constraint with a sidecar receipt.
+  Hiding only a joint marker does not suppress that joint. Full context
+  identity is retained even for excluded occurrences.
 
 ## Frames and physics
 
@@ -42,7 +44,8 @@
   visual STL bytes. Multiple shells and cavities reject. Resolution/error
   bounds and strict budgets are recorded; simulation cost is not established.
 - Set both limits for a bounded revolute or slider joint. An unbounded
-  revolute joint is continuous. A slider needs finite travel bounds.
+  revolute joint is continuous. A slider needs finite travel bounds, from the
+  CAD or from a recorded `joint_limits` lower/upper override.
 - The current assembly pose becomes URDF joint zero. Bounded limits subtract
   the current driven position so the physical travel range stays unchanged.
 

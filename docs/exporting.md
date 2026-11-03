@@ -23,6 +23,27 @@ Joint edges point outward from the selected root. Reversing an edge must update 
 
 Selecting a root changes topology, not the design coordinate system or export selection. It does not restrict export to that occurrence’s subtree. Meshes remain in the design pose, and URDF visual origins account for link frames; do not recenter meshes by hand.
 
+`root_origin = "root_occurrence"` moves `base_link`’s frame to the selected root occurrence’s origin, translation only. The design axes are kept, so a Y-up vendor model still needs `output_rotation_preset`. Only data expressed in `base_link`’s frame changes: joint origins whose parent is `base_link` and `base_link`’s own visual, collision and inertial origins shift by minus that origin. Every other link is unchanged, meshes are unchanged, and `config/robot_data.yaml` records the translation under `root_origin`. With `design_root` as the root the shift is zero. Combined with an output rotation or `dh_common_normal`, the export design origin is the root occurrence origin, so the generated `export_output_reference` link (present only for a rotation) coincides with `base_link` and the DH parallel-axis rule projects that origin.
+
+### Export a subset of the assembly
+
+Light bulbs select geometry but cannot change constraints: a joint or rigid group between a kept part and a hidden part is still an error. Use the selection lists when the design holds parts that must not reach the URDF:
+
+```toml
+root_occurrence = "arm:1+base_asm:1"
+include_occurrences = ["arm:1", "wrist_mount:1"]
+exclude_occurrences = ["arm:1+base_asm:1+purchase_parts:1"]
+frame_only_occurrences = ["arm:1+gripper:1+clip:1"]
+```
+
+- `include_occurrences`, when present and nonempty, selects an occurrence iff it equals or descends from a listed path. Occurrence light bulbs are then ignored; body light bulbs still apply. Absent, light bulbs select as before.
+- `exclude_occurrences` removes the listed occurrences and their descendants, and wins over `include_occurrences`.
+- `frame_only_occurrences` keeps the listed occurrences as geometry-free frame links: their own direct bodies contribute no mesh and no mass, so joints and rigid groups that reference them still resolve. Descendants are unaffected. An unreferenced frame-only occurrence adds no link.
+
+A joint, as-built joint or grounding relationship with one endpoint excluded by these lists and the other selected is dropped and recorded in `source_notes` with the option that excluded it. A rigid group drops its config-excluded members, records them, and welds the remaining selected members. Joints whose endpoints are all excluded keep today’s `source_notes` entry. Parts hidden only by a light bulb keep the strict `CONSTRAINT_TARGET_EXCLUDED` errors.
+
+Every listed path must be an exact full occurrence path that exists in the design; unknown paths, duplicates, the same path in two lists, and an include or frame-only path inside an excluded path are configuration errors. `root_occurrence` may name a bodyless occurrence whose descendants are all excluded; it exports as a frame-only `base_link`. The applied lists are recorded under `selection` in `config/robot_data.yaml`.
+
 ### Build links and constraints
 
 Use a component occurrence for each independently moving physical link. Multiple bodies can belong to one link, including a parent component with its own bodies and nested children.
@@ -35,7 +56,7 @@ Check the following conditions:
 - Use root-owned BRep solids for imported chassis geometry when a separate holding component is unnecessary.
 - Connect every selected physical link to the root. Nearby but disconnected parts are not automatically welded.
 
-Ordinary and as-built rigid, revolute, and slider joints work by default. An unbounded revolute becomes continuous; a slider requires finite lower and upper limits. Opt-in [generalized decomposition](generalized-joints.md) adds supported cylindrical, pin-slot, planar, and explicitly export-local unbounded Ball coordinates. Native bounded Ball coordinates remain unsupported. Never replace missing required travel bounds with arbitrary large numbers.
+Ordinary and as-built rigid, revolute, and slider joints work by default. An unbounded revolute becomes continuous; a slider requires finite lower and upper limits, from Fusion or from an explicit [`joint_limits` travel override](joint-settings.md#travel-bounds). Opt-in [generalized decomposition](generalized-joints.md) adds supported cylindrical, pin-slot, planar, and explicitly export-local unbounded Ball coordinates. Native bounded Ball coordinates remain unsupported. Never replace missing required travel bounds with arbitrary large numbers; a configured override is recorded in the sidecar as a deliberate choice.
 
 The current design pose becomes URDF joint zero. The exporter subtracts the current driven position from bounds to retain the physical travel range.
 
@@ -105,12 +126,16 @@ root_occurrence = ""
 | `effort` | Positive finite default joint effort, in N·m or N according to joint type |
 | `velocity` | Positive finite default joint velocity, in rad/s or m/s according to joint type |
 | `root_occurrence` | Empty for automatic selection, an exact source occurrence path, or `design_root` |
+| `root_origin` | `design` keeps `base_link` at the Fusion origin; `root_occurrence` moves it to the selected root occurrence origin, translation only |
+| `include_occurrences` | Array of exact full occurrence paths; when nonempty, only listed subtrees are selected and occurrence light bulbs are ignored |
+| `exclude_occurrences` | Array of exact full occurrence paths removed with their descendants; wins over `include_occurrences` |
+| `frame_only_occurrences` | Array of exact full occurrence paths kept as geometry-free frame links without their own bodies |
 
 Use the dedicated references for advanced settings and opt-in modes:
 
 | Options | Reference |
 | --- | --- |
-| `joint_limits` | [Per-joint effort/velocity and exact exported selectors](joint-settings.md) |
+| `joint_limits` | [Per-joint effort/velocity, travel bounds, and exact exported selectors](joint-settings.md) |
 | `generalized_joints`, `ball_chart` | [Primitive decomposition and coordinate/bound limitations](generalized-joints.md) |
 | `motion_links` | [Affine mimic relations, feasible limits, and independent commands](motion-coupling.md) |
 | `mesh_physics` | [Explicit density or supplied central SI physics](mesh-inputs.md); no inferred density or surface thickness |
@@ -145,7 +170,7 @@ Use the named error to find the source condition instead of changing the design 
 | Root selection is missing or ambiguous | Name one chassis `base_link` or configure an exact occurrence path. Distinguish repeated instances and grounded candidates. |
 | A link is disconnected | Add the intended constraint or exclude the geometry deliberately. Spatial proximity is not a fixed connection. |
 | A hidden joint marker still exports | Suppress the joint only if you intend to remove its mechanics. Hiding its marker is not suppression. |
-| A mechanism depends on hidden geometry | Make the required endpoint visible or change the selection; do not silently drop one side of a constraint. |
+| A mechanism depends on hidden geometry | Make the required endpoint visible, or list the unwanted part in `exclude_occurrences` so the crossing constraint is dropped with a `source_notes` receipt; light bulbs alone never drop one side of a constraint. |
 | Grounding has no representable parent or world anchor | Inspect actual fixed ancestry, root choice, and unavailable references. Keep grounding flags; containment alone does not prove a fixed connection. |
 | A duplicate identity or mesh target appears | Inspect full raw occurrence identities and `source_identifiers`; output aliases do not resolve source endpoints. |
 | Mass or inertia is invalid | Check solids, material density, units, and physical properties. Mesh-only inputs require a validated physical-property policy. |

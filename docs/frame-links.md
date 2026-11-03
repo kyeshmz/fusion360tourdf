@@ -12,6 +12,12 @@ Visible physical sources remain selected as before. Empty contexts become links
 only when an active joint or an explicit rigid-group member references them,
 `root_occurrence` selects them, or an actual Ground To Parent relationship needs
 them. Unused empty assemblies and suppressed constraints do not add links.
+`frame_only_occurrences` makes a listed occurrence empty by dropping its own
+direct bodies; it then follows the same rules. `include_occurrences` and
+`exclude_occurrences` change which contexts are selected; a constraint that
+crosses from a selected context into one excluded by those lists is dropped
+with a `source_notes` receipt instead of failing. See
+[subset export](exporting.md#export-a-subset-of-the-assembly).
 
 An exact `root_occurrence` may identify an empty occurrence or `design_root`.
 The selected source is named `base_link`. A legitimate `None` joint endpoint
