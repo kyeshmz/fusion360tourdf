@@ -342,6 +342,14 @@ def source_path(owner):
     return getattr(owner, 'fullPathName', None) or getattr(owner, 'name', 'design_root')
 
 
+def _body_selected(body, own_bulb_only):
+    # Fusion's body isVisible inherits hidden parent occurrences, which include_occurrences overrides.
+    bulb = getattr(body, 'isLightBulbOn', None) if own_bulb_only else None
+    if bulb is None:
+        return occurrence_visible(body)
+    return (bulb() if callable(bulb) else bulb) is not False
+
+
 def visible_bodies(owner):
     return tuple(body for body in collection_items(getattr(owner, 'bRepBodies', ()))
                  if occurrence_visible(body))
@@ -438,6 +446,7 @@ def link_sources(root, config=None, *, joint_records=None, cancelled=None):
     owner_paths = [(owner, 'design_root' if owner is root else source_path(owner)) for owner in occurrences + [root]]
     exclusion = _exclusion_policy(config, owner_paths)
     frame_only = set(config.get('frame_only_occurrences') or ())
+    own_bulb_only = bool(config.get('include_occurrences'))
     contexts = tuple(OccurrenceContext(owner, path, _native(owner), exclusion(path),
         path not in frame_only and bool(collection_items(getattr(owner, 'bRepBodies', ()))
                                         or collection_items(getattr(owner, 'meshBodies', ()))),
@@ -449,8 +458,9 @@ def link_sources(root, config=None, *, joint_records=None, cancelled=None):
         if not entry.selected or not entry.physical:
             continue
         mesh_bodies = [body for body in collection_items(getattr(owner, 'meshBodies', ()))
-                       if occurrence_visible(body)]
-        bodies = visible_bodies(owner)
+                       if _body_selected(body, own_bulb_only)]
+        bodies = tuple(body for body in collection_items(getattr(owner, 'bRepBodies', ()))
+                       if _body_selected(body, own_bulb_only))
         matrix = occurrence_matrix_array(owner) if mesh_bodies and owner is not root else None
         bodies += tuple(mesh_inputs.capture(body, owner, path, matrix) for body in mesh_bodies)
         if not bodies:

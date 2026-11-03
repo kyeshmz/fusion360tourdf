@@ -16,6 +16,7 @@ from tests.test_exporter_logic import FakePoint, identity_at
 from tests.test_fusion_inputs import Body, design, first_vertex_fk, fixed, group, hinge, occurrence, root
 from URDF_Exporter.core.Write import write_ros2_package
 from URDF_Exporter.utils import config as config_mod
+from URDF_Exporter.utils import utils
 from URDF_Exporter.utils.export_policy import apply_export_policies, Y_UP_TO_Z_UP
 
 ENTRY = importlib.import_module('URDF_Exporter.URDF_Exporter')
@@ -161,6 +162,16 @@ class IncludeExcludeTest(ExportMixin, unittest.TestCase):
         result = self.export(component, config)
         self.assert_subset(*result, 'include_occurrences')
         self.assertEqual(result[1]['selection'], config)
+
+    def test_include_keeps_bodies_of_hidden_parts_by_their_own_light_bulb(self):
+        component, lift, arm, _ = self.assembly()
+        arm.isVisible = lift.isVisible = False
+        arm_body = utils.collection_items(arm.bRepBodies)[0]
+        arm_body.isVisible, arm_body.isLightBulbOn = False, True
+        config = {'include_occurrences': ['base:1', 'module:1', 'clip:1']}
+        self.assert_subset(*self.export(component, config), 'include_occurrences')
+        arm_body.isLightBulbOn = False
+        self.assert_rejected(component, config, r'drive.*CONSTRAINT_TARGET_EXCLUDED.*module:1\+arm:1')
 
     def test_exclude_without_include_keeps_light_bulb_selection_for_other_parts(self):
         component, lift, _, clip = self.assembly()
