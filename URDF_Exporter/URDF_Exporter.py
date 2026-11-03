@@ -38,9 +38,12 @@ def export_design(design, destination, *, config=None, cancelled=None):
                       'Only the supplied occurrence override and current face/body appearances are read.'})
     if source_notes:
         inertial['base_link']['source_notes'] = source_notes
+    root_owner = sources['base_link'].owner
+    root_origin_cm = utils.occurrence_translation(root_owner) if hasattr(root_owner, 'component') else [0, 0, 0]
     return Write.write_ros2_package(destination, robot_name, joints, inertial, cancelled=cancelled,
         write_meshes=lambda targets: utils.export_stl(design, targets, config=config, sources=sources, cancelled=cancelled),
-        config=config, visual_assets=utils.collect_visual_assets(sources, config))
+        config=config, visual_assets=utils.collect_visual_assets(sources, config),
+        root_origin_m=None if root_origin_cm is None else [value / 100 for value in root_origin_cm])
 
 
 def run(context):

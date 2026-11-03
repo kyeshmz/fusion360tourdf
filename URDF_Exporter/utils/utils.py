@@ -124,10 +124,20 @@ class OccurrenceContext:
     owner: object
     path: str
     native: object
-    visible: bool
+    exclusion: object  # None when selected, else 'light_bulb' or the excluding config option
     physical: bool
     grounded: bool
     ground_to_parent: bool
+
+    @property
+    def selected(self):
+        return self.exclusion is None
+
+
+class ExcludedSource(ValueError):
+    def __init__(self, path):
+        super().__init__('CONSTRAINT_TARGET_EXCLUDED: ' + path)
+        self.path = path
 
 
 @dataclass(frozen=True)
@@ -192,6 +202,12 @@ class SourceRegistry(Mapping):
     def source_path(self, name):
         return self._paths[name]
 
+    def config_exclusion(self, path):
+        """The config option that excluded this context, or None for selected or light-bulb-hidden contexts."""
+        entry = self._by_path.get(path)
+        exclusion = entry.exclusion if entry is not None else None
+        return exclusion if exclusion in config_mod.SELECTION_OPTIONS else None
+
     def _grounding_constraints(self):
         constraints = []
         for entry in self._contexts:
@@ -252,6 +268,12 @@ class SourceRegistry(Mapping):
                                  'world-grounded selected root; set root_occurrence to a grounded source' %
                                  constraint.child)
             if child is None or parent is None:
+                excluded = constraint.child if child is None else constraint.parent
+                option = self.config_exclusion(excluded)
+                if option:
+                    source_notes.append(dict(provenance, reason='Grounding endpoint %s is excluded by %s'
+                                             % (excluded, option)))
+                    continue
                 raise ValueError('CONSTRAINT_TARGET_EXCLUDED: grounding %s crosses excluded sources %s -> %s' %
                                  (provenance['name'], constraint.child, constraint.parent))
             if child == parent:
@@ -307,7 +329,7 @@ class SourceRegistry(Mapping):
         entry = self.resolve_context(occurrence, context)
         if entry.path in self._names:
             return self._names[entry.path]
-        raise ValueError('CONSTRAINT_TARGET_EXCLUDED: ' + entry.path)
+        raise ExcludedSource(entry.path)
 
     def rigid_members(self, occurrence, context=None):
         entry = self.resolve_context(occurrence, context)
@@ -320,6 +342,14 @@ def source_path(owner):
     return getattr(owner, 'fullPathName', None) or getattr(owner, 'name', 'design_root')
 
 
+def _body_selected(body, own_bulb_only):
+    # Fusion's body isVisible inherits hidden parent occurrences, which include_occurrences overrides.
+    bulb = getattr(body, 'isLightBulbOn', None) if own_bulb_only else None
+    if bulb is None:
+        return occurrence_visible(body)
+    return (bulb() if callable(bulb) else bulb) is not False
+
+
 def visible_bodies(owner):
     return tuple(body for body in collection_items(getattr(owner, 'bRepBodies', ()))
                  if occurrence_visible(body))
@@ -329,7 +359,7 @@ def _select_frame_sources(root, sources, contexts, configured, joint_records):
     registry = SourceRegistry(sources, contexts)
 
     def select(entry):
-        if entry.visible and not entry.physical and entry.path not in registry._names:
+        if entry.selected and not entry.physical and entry.path not in registry._names:
             _require_valid_occurrence(entry.owner, entry.path)
             name = entry.path
             if name in sources and sources[name].owner is not entry.owner:
@@ -337,9 +367,9 @@ def _select_frame_sources(root, sources, contexts, configured, joint_records):
             sources[name] = LinkSource(entry.owner, (), kind='frame')
 
     if configured:
-        entries = [entry for entry in contexts if entry.path == configured and entry.visible]
+        entries = [entry for entry in contexts if entry.path == configured and entry.selected]
         if len(entries) != 1:
-            raise ValueError('ROOT_NOT_FOUND: %s must identify one visible source by full path' % configured)
+            raise ValueError('ROOT_NOT_FOUND: %s must identify one selected source by full path' % configured)
         select(entries[0])
     for joint, _ in joint_records:
         if getattr(joint, 'isSuppressed', False):
@@ -372,8 +402,35 @@ def _select_frame_sources(root, sources, contexts, configured, joint_records):
             return registry
 
 
+def _exclusion_policy(config, owner_paths):
+    """Decide, per context path, None (selected) or why it is excluded.
+
+    Light bulbs decide only when include_occurrences is absent; exclude_occurrences
+    wins over both. Listed paths must name existing contexts exactly.
+    """
+    paths = {path for _, path in owner_paths}
+    for option in config_mod.SELECTION_OPTIONS:
+        for path in config.get(option) or ():
+            if path not in paths:
+                raise ValueError('OCCURRENCE_NOT_FOUND: %s path %r is not an exact full occurrence path in this '
+                                 'design' % (option, path))
+    include, exclude = config.get('include_occurrences'), config.get('exclude_occurrences') or ()
+    hidden = [path for owner, path in owner_paths if not occurrence_visible(owner)]
+
+    def within(path, listed):
+        return any(path == p or path.startswith(p + '+') for p in listed)
+
+    def exclusion(path):
+        if within(path, exclude):
+            return 'exclude_occurrences'
+        if include is not None:
+            return None if within(path, include) else 'include_occurrences'
+        return 'light_bulb' if within(path, hidden) else None
+    return exclusion
+
+
 def link_sources(root, config=None, *, joint_records=None, cancelled=None):
-    """Capture visible direct bodies and explicitly required frame contexts."""
+    """Capture selected direct bodies and explicitly required frame contexts."""
     config = config_mod.load_config(overrides=config)
     configured = config['root_occurrence']
     mesh_inputs = MeshInputs(config.get('mesh_physics'), cancelled)
@@ -386,20 +443,24 @@ def link_sources(root, config=None, *, joint_records=None, cancelled=None):
                     raise ValueError('MOTION_LINK_NOT_IMPLEMENTED: %s / %s is an active Fusion motion link; '
                                      'select motion_links=mimic explicitly' %
                                      (source_path(owner), motion_link.name))
-    hidden = [source_path(occ) for occ in occurrences if not occurrence_visible(occ)]
-    contexts = tuple(OccurrenceContext(owner, 'design_root' if owner is root else source_path(owner),
-        _native(owner), occurrence_visible(owner) and not any(source_path(owner).startswith(p + '+') for p in hidden),
-        bool(collection_items(getattr(owner, 'bRepBodies', ())) or collection_items(getattr(owner, 'meshBodies', ()))),
+    owner_paths = [(owner, 'design_root' if owner is root else source_path(owner)) for owner in occurrences + [root]]
+    exclusion = _exclusion_policy(config, owner_paths)
+    frame_only = set(config.get('frame_only_occurrences') or ())
+    own_bulb_only = bool(config.get('include_occurrences'))
+    contexts = tuple(OccurrenceContext(owner, path, _native(owner), exclusion(path),
+        path not in frame_only and bool(collection_items(getattr(owner, 'bRepBodies', ()))
+                                        or collection_items(getattr(owner, 'meshBodies', ()))),
         bool(getattr(owner, 'isGrounded', False)), bool(getattr(owner, 'isGroundToParent', False)))
-        for owner in occurrences + [root])
+        for owner, path in owner_paths)
     for entry in contexts:
         check_cancelled(cancelled)
         owner, path = entry.owner, entry.path
-        if not entry.visible:
+        if not entry.selected or not entry.physical:
             continue
         mesh_bodies = [body for body in collection_items(getattr(owner, 'meshBodies', ()))
-                       if occurrence_visible(body)]
-        bodies = visible_bodies(owner)
+                       if _body_selected(body, own_bulb_only)]
+        bodies = tuple(body for body in collection_items(getattr(owner, 'bRepBodies', ()))
+                       if _body_selected(body, own_bulb_only))
         matrix = occurrence_matrix_array(owner) if mesh_bodies and owner is not root else None
         bodies += tuple(mesh_inputs.capture(body, owner, path, matrix) for body in mesh_bodies)
         if not bodies:
@@ -418,7 +479,7 @@ def link_sources(root, config=None, *, joint_records=None, cancelled=None):
         candidates = [name for name, source in sources.items()
                       if ('design_root' if source.owner is root else source_path(source.owner)) == configured]
         if len(candidates) != 1:
-            raise ValueError('ROOT_NOT_FOUND: %s must identify one visible source by full path' % configured)
+            raise ValueError('ROOT_NOT_FOUND: %s must identify one selected source by full path' % configured)
     else:
         candidates = [name for name, source in sources.items()
                       if source.owner is not root and source.owner.component.name == 'base_link']

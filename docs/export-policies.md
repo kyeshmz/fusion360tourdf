@@ -140,6 +140,10 @@ The input schema matches the current writer's source quantities.
 * `source_root_frame={"t": [...], "R": [...]}` optionally supplies the base
   link's absolute zero-pose design frame. The default is identity. `R` is a flat,
   row-major, active 3-by-3 rotation. All other returned rotations use that shape.
+* `source_origin=[...]` optionally names the source design point that becomes
+  the output design origin. The writer passes the root occurrence origin as both
+  `source_root_frame.t` and `source_origin`, so the root pose stays identity
+  (no reference link) unless a rotation is selected.
 
 Relevant numeric fields must have the exact vector sizes and finite non-boolean
 numbers. Axes must be nonzero. Rotations must be proper and orthonormal within
@@ -156,18 +160,21 @@ Derived numeric overflow is an error, not a usable partial result.
 
 ## Output rotation and exact emitter contract
 
-Let `G` be the selected source-design-to-output-design rotation, or identity.
-There is no global translation policy. `Y_UP_TO_Z_UP` is a positive 90-degree
-rotation about X. It maps `(x,y,z)` to `(x,-z,y)`, so positive source Y becomes
-positive output Z. It is not automatically selected from CAD metadata.
+Let `G` be the selected source-design-to-output-design rotation, or identity,
+and `o` the optional `source_origin`, the source design point that becomes the
+output design origin (default zero). The writer passes the root occurrence
+origin as `o` for `root_origin = "root_occurrence"`; there is no other
+translation policy. `Y_UP_TO_Z_UP` is a positive 90-degree rotation about X.
+It maps `(x,y,z)` to `(x,-z,y)`, so positive source Y becomes positive output Z.
+It is not automatically selected from CAD metadata.
 
 The returned design quantities obey:
 
 ```
-p_output = G p_source
-c_output = G c_source
+p_output = G (p_source - o)
+c_output = G (c_source - o)
 I_output = G I_source G^T
-F_output_zero = [G,0] F_source_zero
+F_output_zero = [G,-G o] F_source_zero
 ```
 
 All six central tensor components are transformed. Translating a link frame
@@ -183,8 +190,8 @@ They are ready-to-emit poses, not additional corrections to the old origins.
 | --- | --- |
 | `emission.root_pose` | Absolute output-design pose of the root. Preserve it with an explicit external reference/fixed parent when nonidentity. Do not silently reset it to identity. |
 | `emission.joint_origins[joint]` | Parent-link-to-child-link zero pose `F_parent^-1 F_child`. Use its `t` and `R` once. Returned joint dictionaries also contain equivalent absolute `xyz`, parent-relative `rpy`, and joint-local `axis`. |
-| `mesh_source_to_output` | Rigid pose `[G,0]` of the unchanged source-design geometry in output-design coordinates. |
-| `emission.mesh_origins[link]` | `F_link^-1 [G,0]`. Apply it to **unchanged source-design STL vertices**, after `emission.mesh_scale = [0.001]*3` converts millimeters to meters. The same origin applies to visual and mesh collision. |
+| `mesh_source_to_output` | Rigid pose `[G,-G o]` of the unchanged source-design geometry in output-design coordinates. |
+| `emission.mesh_origins[link]` | `F_link^-1 [G,-G o]`. Apply it to **unchanged source-design STL vertices**, after `emission.mesh_scale = [0.001]*3` converts millimeters to meters. The same origin applies to visual and mesh collision. |
 | `emission.inertials[link]` | Original mass, local COM `R_link^T(c_output-t_link)`, and local central tensor `R_link^T I_output R_link`. The inertial pose uses this COM and identity rotation. Do not rotate the tensor a second time. |
 | `emission.boxes[link]` | Box pose `F_link^-1 [G,G c_box_source]` and the **unchanged source box side lengths** in meters. Its rotation carries the source box basis. Do not use the mesh translation as the box center, rotate an already recomputed AABB, or apply STL scaling. |
 

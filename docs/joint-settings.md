@@ -1,8 +1,8 @@
-# Joint effort and velocity settings
+# Joint effort, velocity and travel settings
 
-`joint_limits` sets effort and velocity for individual moving joints in a ROS 2 export.
+`joint_limits` sets effort and velocity for individual moving joints in a ROS 2 export, and optionally replaces their travel bounds.
 Ordinary Fusion joints and as-built joints use the same options.
-These settings do not edit the CAD design or override its travel bounds.
+These settings do not edit the CAD design.
 
 ## Python configuration
 
@@ -67,10 +67,11 @@ The exporter raises `ValueError` for these inputs before it publishes a package:
 - A fixed joint, including a locked joint or a generated rigid attachment.
 - Two source joints with the same sanitized export name.
 - A value other than a mapping of joint names to field mappings.
-- A field other than `effort` or `velocity`.
-- A field value that is not a finite positive real number representable as a Python float.
+- A field other than `effort`, `velocity`, `lower`, or `upper`.
+- An `effort` or `velocity` value that is not a finite positive real number representable as a Python float.
+- A `lower` without `upper` or vice versa, a nonfinite travel value, or `lower` not strictly less than `upper`.
 
-Booleans, numeric strings, zero, negative values, NaN, and infinity are invalid.
+For effort and velocity, booleans, numeric strings, zero, negative values, NaN, and infinity are invalid.
 The loader normalizes valid values to floats and copies nested tables.
 It does not mutate the caller's mapping or the global defaults.
 
@@ -105,15 +106,39 @@ The existing `ros2_control` joints and controller membership keep the same joint
 Those control assets do not add separate effort or velocity limit parameters.
 These settings are description metadata, not proof that hardware enforces the limits.
 
-## Travel bounds and limitations
+## Travel bounds
 
-Lower and upper travel bounds remain authoritative Fusion motion data relative to the exported current pose.
+Lower and upper travel bounds default to Fusion motion data relative to the exported current pose.
 For example, a revolute joint at `0.25` rad with CAD bounds `[-1, 2]` exports bounds `[-1.25, 1.75]`.
 A slider at `5` cm with CAD bounds `[0, 20]` cm exports bounds `[-0.05, 0.15]` m.
 Effort and velocity overrides do not change either result.
 Continuous joints accept both settings without adding lower or upper bounds.
 
-There is no travel-bound override or generalized-joint decomposition option.
+`lower` and `upper` replace the exported travel of one joint:
+
+```toml
+[joint_limits.shoulder]
+lower = -3.141592653589793
+upper = 3.141592653589793
+
+[joint_limits.gripper_slide]
+lower = -0.00519
+upper = 0.03241
+```
+
+Both fields are required together, in exported SI units (rad for revolute, m for prismatic), measured from the design pose, which is URDF zero.
+They are not rebased by the current driven position; write the bounds you want in the URDF.
+A CAD-unbounded revolute joint becomes `revolute` with these bounds instead of `continuous`.
+A CAD-unbounded slider, which otherwise fails with `SLIDER_TRAVEL_REQUIRED`, exports with them.
+When Fusion already has bounds, the override replaces them.
+Each overridden joint records `travel_override.replaced` with the CAD type and bounds in `config/robot_data.yaml`.
+
+A mimic follower and its leader may both be overridden.
+The follower keeps its own bounds; the leader's effective bounds are the intersection of its own bounds with the follower's bounds mapped through the affine relation, exactly as the [coupling planner](motion-coupling.md) does for CAD bounds.
+
+## Limitations
+
+There is no generalized-joint decomposition option in this table.
 Existing loop reduction remains unchanged.
 A closing joint omitted from the URDF tree retains its resolved values in the sidecar's `closing_joints` metadata.
 Closing-joint selectors are validated against the complete joint set before tree reduction.

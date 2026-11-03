@@ -317,22 +317,28 @@ def _relative(parent, child):
 
 def apply_export_policies(joints, inertial, *, output_rotation=None,
                           frame_convention=None, minimum_principal_inertia=None,
-                          source_root_frame=None):
+                          source_root_frame=None, source_origin=None):
     """Return owned dictionaries, receipts, and local emitter poses.
 
     All three policy defaults are disabled. Input xyz/COM/tensors are in source
     design-frame SI, rpy is parent-relative, axes are joint-local. The source
-    root frame defaults to identity. No mesh bytes or source objects are edited.
+    root frame defaults to identity. source_origin is the source design point
+    that becomes the output design origin (default zero); meshes stay in source
+    coordinates and mesh_source_to_output carries the compensating translation.
+    No mesh bytes or source objects are edited.
     """
     if frame_convention not in (None, 'dh_common_normal'):
         raise ValueError('frame_convention must be None or dh_common_normal')
     _threshold(minimum_principal_inertia)
     rotation = list(_IDENTITY) if output_rotation is None else _rotation(output_rotation, 'output_rotation')
+    origin = [0., 0., 0.] if source_origin is None else _vector(source_origin, 3, 'source_origin')
     source_frames, order, inertia_receipts = _source(joints, inertial, source_root_frame,
                                                     minimum_principal_inertia)
     result_joints, result_inertial = deepcopy(joints), deepcopy(inertial)
-    frames = {name: {'t': tf.rotate_vector_by_mat3(frame['t'], rotation),
-                     'R': list(tf.mat3_mul(rotation, frame['R']))}
+
+    def to_output(point):
+        return tf.rotate_vector_by_mat3(_sub(point, origin), rotation)
+    frames = {name: {'t': to_output(frame['t']), 'R': list(tf.mat3_mul(rotation, frame['R']))}
               for name, frame in source_frames.items()}
     warnings = []
     for name, entry in result_inertial.items():
@@ -343,14 +349,14 @@ def apply_export_policies(joints, inertial, *, output_rotation=None,
             warnings.append(name + ': ' + receipt['warning'])
         if receipt['changed']:
             entry['inertia'] = deepcopy(receipt['final'])
-        if output_rotation is not None:
-            entry['center_of_mass'] = tf.rotate_vector_by_mat3(entry['center_of_mass'], rotation)
+        if output_rotation is not None or source_origin is not None:
+            entry['center_of_mass'] = to_output(entry['center_of_mass'])
             entry['inertia'] = _rotate_tensor(entry['inertia'], rotation)
             if entry.get('bbox_center_m') is not None:
-                entry['bbox_center_m'] = tf.rotate_vector_by_mat3(entry['bbox_center_m'], rotation)
-    if output_rotation is not None:
+                entry['bbox_center_m'] = to_output(entry['bbox_center_m'])
+    if output_rotation is not None or source_origin is not None:
         for joint in result_joints.values():
-            joint['xyz'] = tf.rotate_vector_by_mat3(joint['xyz'], rotation)
+            joint['xyz'] = to_output(joint['xyz'])
     dh_receipt = {}
     if frame_convention is not None:
         old_frames = frames
@@ -362,7 +368,7 @@ def apply_export_policies(joints, inertial, *, output_rotation=None,
             joint['rpy'] = list(tf.rpy_from_mat3(_relative(frames[joint['parent']], frame)['R']))
             world_axis = tf.rotate_vector_by_mat3(_unit(joint['axis']), old_frames[joint['child']]['R'])
             joint['axis'] = tf.rotate_vector_by_mat3(world_axis, tf.mat3_transpose(frame['R']))
-    source_to_output = {'t': [0., 0., 0.], 'R': rotation}
+    source_to_output = {'t': [0., 0., 0.] if source_origin is None else to_output([0., 0., 0.]), 'R': rotation}
     emission = {'root_pose': deepcopy(frames['base_link']), 'joint_origins': {},
                 'mesh_origins': {}, 'mesh_scale': [.001, .001, .001],
                 'boxes': {}, 'inertials': {}}
