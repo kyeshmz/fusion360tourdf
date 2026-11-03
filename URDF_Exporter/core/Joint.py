@@ -56,6 +56,13 @@ def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None,
                 source_notes.append({'name': source_name, 'reason': 'All joint endpoints are excluded'})
                 inventory_entry['status'] = 'excluded'
                 continue
+            option = (sources.config_exclusion(errors[0].path)
+                      if len(errors) == 1 and isinstance(errors[0], utils.ExcludedSource) else None)
+            if option:
+                source_notes.append({'name': source_name, 'reason': 'Joint endpoint %s is excluded by %s'
+                                     % (errors[0].path, option)})
+                inventory_entry['status'] = 'excluded'
+                continue
             raise ValueError(source_name + ': ' + '; '.join(map(str, errors))) from errors[0]
         joint_dict['parent'], joint_dict['child'] = endpoints
         try:
@@ -107,11 +114,10 @@ def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None,
                 if maximum:
                     joint_dict['upper_limit'] = limits.maximumValue * scale - position
                     joint_dict['lower_limit'] = limits.minimumValue * scale - position
-                elif joint_type == 'revolute':
-                    joint_dict['type'] = 'continuous'
-                    joint_dict['lower_limit'] = joint_dict['upper_limit'] = None
                 else:
-                    raise ValueError('Slider joints need finite lower and upper limits')
+                    if joint_type == 'revolute':
+                        joint_dict['type'] = 'continuous'
+                    joint_dict['lower_limit'] = joint_dict['upper_limit'] = None
             except Exception as error:
                 msg = joint.name + ' has invalid motion data: ' + str(error)
                 break
@@ -157,6 +163,10 @@ def make_joints_dict(root, msg, config=None, *, sources=None, source_notes=None,
         else:
             joints_dict = resolve_joint_limits(joints_dict, dict(config, joint_limits={n: v for n, v in
                 config.get('joint_limits', {}).items() if n in joints_dict}))
+        for name, joint_dict in joints_dict.items():
+            if joint_dict['type'] == 'prismatic' and joint_dict['lower_limit'] is None:
+                raise ValueError('SLIDER_TRAVEL_REQUIRED: %s has no Fusion travel bounds; set both limits in Fusion '
+                                 'or configure joint_limits[%r] lower and upper' % (name, name))
         joints_dict = _orient_outward(joints_dict, sources)
         macro_tree, closing, loop_warnings = validate.detect_closing_joints(joints_dict)
         source_poses = {name: list(_source_pose_cm(name, sources)) for name in sources}
@@ -389,6 +399,7 @@ def _source_rotation(name, sources):
 
 
 def _rigid_members(group, sources):
+    """Selected member names and the config-excluded member paths dropped from the weld."""
     members, excluded = set(), []
     context = getattr(group, 'assemblyContext', None)
     for occurrence in utils.collection_items(group.occurrences):
@@ -398,10 +409,11 @@ def _rigid_members(group, sources):
             raise ValueError(group.name + ': ' + str(error)) from error
         members.update(selected)
         excluded.extend(hidden)
-    if members and excluded:
+    dropped = {path: sources.config_exclusion(path) for path in excluded}
+    if members and not all(dropped.values()):
         raise ValueError('CONSTRAINT_TARGET_EXCLUDED: rigid group %s crosses excluded sources %s' %
                          (group.name, ', '.join(excluded)))
-    return members
+    return members, dropped
 
 
 def _rigid_attachments(root, joints, sources, source_notes):
@@ -410,13 +422,16 @@ def _rigid_attachments(root, joints, sources, source_notes):
     for group in utils.collection_items(getattr(root, 'allRigidGroups', ())):
         if getattr(group, 'isSuppressed', False):
             continue
-        members = _rigid_members(group, sources)
+        members, dropped = _rigid_members(group, sources)
         context = getattr(group, 'assemblyContext', None)
         prefix = getattr(context, 'fullPathName', '')
         source_name = prefix + '+' + group.name if prefix else group.name
         if members:
             groups.append((source_name, members,
                            {'name': source_name, 'source': 'Fusion rigid group', 'members': sorted(members)}))
+            if dropped:
+                source_notes.append({'name': source_name, 'reason': 'Rigid group members excluded by config',
+                                     'excluded': dropped})
         else:
             source_notes.append({'name': source_name, 'reason': 'All rigid group members are excluded'})
     if not groups:

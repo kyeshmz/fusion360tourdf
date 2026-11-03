@@ -20,8 +20,8 @@ from .coupling import apply_couplings, plain_data, evaluate_affine
 from ..utils.visual_assets import validate_asset_bundles, visual_descriptors
 
 
-def _link_frames(joints):
-    frames = {'base_link': {'t': [0, 0, 0], 'R': tf.IDENTITY_3X3}}
+def _link_frames(joints, root=None):
+    frames = {'base_link': {'t': [0, 0, 0], 'R': tf.IDENTITY_3X3} if root is None else dict(root)}
     pending = list(joints.values())
     while pending:
         remaining = []
@@ -236,7 +236,11 @@ ament_package()
 
 
 def resolve_joint_limits(joints_dict, config):
-    """Bind normalized settings to an owned joint copy before topology reduction."""
+    """Bind normalized settings to an owned joint copy before topology reduction.
+
+    Repeated resolution with the same settings is a no-op: the travel receipt
+    keeps the first (CAD) values it replaced.
+    """
     if not isinstance(joints_dict, dict):
         raise ValueError('Joint and inertial data must be dictionaries.')
     joints_dict = copy.deepcopy(joints_dict)
@@ -245,12 +249,19 @@ def resolve_joint_limits(joints_dict, config):
             raise ValueError('joint_limits[%r] does not match an exported joint; use an exact exported '
                              'joint name. Available names: %s' %
                              (name, ', '.join(sorted(map(str, joints_dict)))))
-        if not isinstance(joints_dict[name], dict):
+        joint = joints_dict[name]
+        if not isinstance(joint, dict):
             raise ValueError('Joint %s data must be a dictionary.' % name)
-        if joints_dict[name].get('type') == 'fixed':
-            raise ValueError('joint_limits[%r] targets a fixed joint; effort and velocity require '
+        if joint.get('type') == 'fixed':
+            raise ValueError('joint_limits[%r] targets a fixed joint; effort, velocity and travel require '
                              'a moving joint' % name)
-        joints_dict[name].update(limits)
+        joint.update((key, value) for key, value in limits.items() if key in config_mod.JOINT_LIMIT_FIELDS)
+        if 'lower' in limits:
+            joint.setdefault('travel_override', {'source': 'joint_limits', 'replaced': {
+                key: joint.get(key) for key in ('type', 'lower_limit', 'upper_limit')}})
+            joint['lower_limit'], joint['upper_limit'] = limits['lower'], limits['upper']
+            if joint['type'] == 'continuous':
+                joint['type'] = 'revolute'
     for joint in joints_dict.values():
         if isinstance(joint, dict) and joint.get('type') != 'fixed':
             for key in config_mod.JOINT_LIMIT_FIELDS:
@@ -273,7 +284,20 @@ def _output_reference(joints, inertial, root_pose):
     return {'link': unique('export_output_reference'), 'joint': unique('export_output_to_base_link')}
 
 
-def _zero_floor_policy(joints, inertial):
+def _root_frame(config, root_origin_m):
+    """base_link's zero pose in the design frame: identity, or the root occurrence origin with design axes."""
+    if config['root_origin'] == 'design':
+        return None
+    if root_origin_m is None:
+        raise ValueError('LINK_FRAME_UNAVAILABLE: root_origin=root_occurrence needs the selected root source '
+                         'origin (root_origin_m)')
+    if not isinstance(root_origin_m, (list, tuple)) or len(root_origin_m) != 3 or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in root_origin_m):
+        raise ValueError('root_origin_m must be three finite design-frame meters')
+    return {'t': [float(v) for v in root_origin_m], 'R': list(tf.IDENTITY_3X3)}
+
+
+def _zero_floor_policy(joints, inertial, root=None):
     """Zero is identity even when finite tensor eigenvalues overflow."""
     receipts = {}
     for name, entry in inertial.items():
@@ -292,18 +316,19 @@ def _zero_floor_policy(joints, inertial):
                               principal_moment_scale_kg_m2=1. if representable else magnitude)
     identity = {'t': [0., 0., 0.], 'R': list(tf.IDENTITY_3X3)}
     return {'joints': joints, 'inertial': inertial, 'emission': None,
-            'link_frames': _link_frames(joints), 'mesh_source_to_output': identity, 'warnings': [],
+            'link_frames': _link_frames(joints, root), 'mesh_source_to_output': identity, 'warnings': [],
             'receipts': {'coordinate_rotation': {'enabled': False, 'source_to_output_rotation': identity['R']},
                          'frame_convention': {'selected': None, 'joints': {}}, 'inertia': receipts}}
 
 
 def write_ros2_package(destination, robot_name, joints_dict, inertial_dict, *, write_meshes, config=None,
-                       cancelled=None, visual_assets=None, motion_relations=None):
+                       cancelled=None, visual_assets=None, motion_relations=None, root_origin_m=None):
     """Publish a new package only after its batch mesh callback succeeds.
 
     Joint xyz and link CoM/inertia are in the design frame, in SI units.
     Joint rpy is relative to its parent link and axis is in the joint frame.
-    Meshes must be binary STL in design-frame millimeters.
+    Meshes must be binary STL in design-frame millimeters. root_origin_m is the
+    selected root source's design-frame origin, used only by root_origin=root_occurrence.
     """
     destination = Path(destination).absolute()
     if os.path.lexists(destination):
@@ -352,6 +377,7 @@ def write_ros2_package(destination, robot_name, joints_dict, inertial_dict, *, w
     policy = None
     output_reference = None
     root_pose = {'t': [0., 0., 0.], 'R': list(tf.IDENTITY_3X3)}
+    root_frame = _root_frame(config, root_origin_m)
     if any(config.get(key) is not None for key in config_mod.POLICY_OPTIONS):
         if config.get('frame_convention') is not None:
             if closing:
@@ -362,11 +388,13 @@ def write_ros2_package(destination, robot_name, joints_dict, inertial_dict, *, w
         rotation = Y_UP_TO_Z_UP if config.get('output_rotation_preset') is not None else config.get('output_rotation')
         original_closing = {entry['joint']: copy.deepcopy(joints_dict.get(entry['joint'], entry)) for entry in closing}
         if rotation is None and config.get('frame_convention') is None and config.get('minimum_principal_inertia') == 0:
-            policy = _zero_floor_policy(joints, inertial_dict)
+            policy = _zero_floor_policy(joints, inertial_dict, root_frame)
         else:
             policy = apply_export_policies(joints, inertial_dict, output_rotation=rotation,
                                           frame_convention=config.get('frame_convention'),
-                                          minimum_principal_inertia=config.get('minimum_principal_inertia'))
+                                          minimum_principal_inertia=config.get('minimum_principal_inertia'),
+                                          source_root_frame=root_frame,
+                                          source_origin=root_frame['t'] if root_frame else None)
             root_pose = policy['emission']['root_pose']
         joints, inertial_dict = policy['joints'], policy['inertial']
         frames = policy['link_frames']
@@ -381,7 +409,7 @@ def write_ros2_package(destination, robot_name, joints_dict, inertial_dict, *, w
                     entry['xyz'] = tf.rotate_vector_by_mat3(entry['xyz'], rotation)
         output_reference = _output_reference(joints, inertial_dict, root_pose)
     else:
-        frames = _link_frames(joints)
+        frames = _link_frames(joints, root_frame)
     independent = plan['independent_joints'] if plan else [n for n, j in joints.items() if j['type'] != 'fixed']
     movable = [(name, joints[name]) for name in independent]
     initial_positions = {name: (0. if joint['type'] == 'continuous' else
@@ -575,6 +603,12 @@ Visualization Manager:
             sidecar[key]['physics_policy'] = 'mass-unchanged; output-inertia-explicit-spectral-floor'
             sidecar['warnings'] = [warning.replace('visual and CAD physics are unchanged',
                 'visual and mass are unchanged; output inertia has an explicit spectral floor') for warning in sidecar['warnings']]
+        if root_frame is not None:
+            sidecar['root_origin'] = {'selected': 'root_occurrence', 'translation_m': list(root_frame['t']),
+                                      'axes': 'design'}
+        selection = {key: config[key] for key in config_mod.SELECTION_OPTIONS if config.get(key) is not None}
+        if selection:
+            sidecar['selection'] = selection
         if inertial_dict['base_link'].get('source_notes'):
             sidecar['source_notes'] = inertial_dict['base_link']['source_notes']
         (stage / 'config/robot_data.yaml').write_text(json.dumps(sidecar, indent=2, allow_nan=False) + '\n', encoding='utf-8')

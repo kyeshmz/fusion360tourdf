@@ -13,11 +13,14 @@ DEFAULTS = {
     'effort': 100.0,
     'velocity': 100.0,
     'root_occurrence': '',
+    'root_origin': 'design',
 }
 POLICY_DEFAULTS = {'generalized_joints': 'reject', 'ball_chart': 'reject',
                     'motion_links': 'reject', 'visual_materials': 'legacy', 'visual_meshes': 'combined'}
 POLICY_OPTIONS = ('output_rotation', 'output_rotation_preset', 'frame_convention', 'minimum_principal_inertia')
+SELECTION_OPTIONS = ('include_occurrences', 'exclude_occurrences', 'frame_only_occurrences')
 JOINT_LIMIT_FIELDS = ('effort', 'velocity')
+JOINT_TRAVEL_FIELDS = ('lower', 'upper')
 COLLISION_DEFAULTS = {'resolution': 16, 'max_pieces': 32768, 'max_cells': 32768,
                       'max_work': 2000000, 'max_triangles': 10000, 'max_pair_checks': 2000000}
 COLLISION_MAXIMUMS = {'resolution': 64, 'max_pieces': 262144, 'max_cells': 262144,
@@ -39,6 +42,19 @@ def _positive_number(value, label):
     return number
 
 
+def _finite_number(value, label):
+    message = '%s must be a finite number' % label
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(message)
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        raise ValueError(message) from None
+    if not math.isfinite(number):
+        raise ValueError(message)
+    return number
+
+
 def _joint_limits(values):
     if not isinstance(values, Mapping):
         raise ValueError('joint_limits must be a table keyed by exact exported joint names')
@@ -47,14 +63,46 @@ def _joint_limits(values):
         if not isinstance(name, str) or not name:
             raise ValueError('joint_limits selector must be a nonempty exact exported joint name')
         if not isinstance(fields, Mapping):
-            raise ValueError('joint_limits[%r] must be a table of effort and velocity options' % name)
-        unknown = fields.keys() - JOINT_LIMIT_FIELDS
+            raise ValueError('joint_limits[%r] must be a table of effort, velocity, lower and upper options' % name)
+        unknown = fields.keys() - JOINT_LIMIT_FIELDS - set(JOINT_TRAVEL_FIELDS)
         if unknown:
             raise ValueError('Unknown joint_limits[%r] options: %s' %
                              (name, ', '.join(sorted(map(str, unknown)))))
-        result[name] = {key: _positive_number(value, 'joint_limits[%r].%s' % (name, key))
-                        for key, value in fields.items()}
+        result[name] = {key: _positive_number(fields[key], 'joint_limits[%r].%s' % (name, key))
+                        for key in JOINT_LIMIT_FIELDS if key in fields}
+        travel = {key: _finite_number(fields[key], 'joint_limits[%r].%s' % (name, key))
+                  for key in JOINT_TRAVEL_FIELDS if key in fields}
+        if travel:
+            if len(travel) != 2:
+                raise ValueError('joint_limits[%r] requires both lower and upper travel bounds' % name)
+            if not travel['lower'] < travel['upper']:
+                raise ValueError('joint_limits[%r].lower must be less than upper' % name)
+            result[name].update(travel)
     return result
+
+
+def _selection(config):
+    listed = {}
+    for option in SELECTION_OPTIONS:
+        paths = config.get(option)
+        if paths is None:
+            continue
+        if not isinstance(paths, (list, tuple)) or any(not isinstance(p, str) or not p for p in paths):
+            raise ValueError('%s must be an array of exact nonempty full occurrence paths' % option)
+        if len(set(paths)) != len(paths):
+            raise ValueError('%s lists a duplicate occurrence path' % option)
+        for path in paths:
+            if path in listed:
+                raise ValueError('%s and %s both list %r' % (listed[path], option, path))
+            listed[path] = option
+        config[option] = list(paths)
+
+    def inside(path, option):
+        return any(path == p or path.startswith(p + '+') for p in config.get(option) or ())
+    for option in ('include_occurrences', 'frame_only_occurrences'):
+        for path in config.get(option) or ():
+            if inside(path, 'exclude_occurrences'):
+                raise ValueError('%s path %r is inside an exclude_occurrences path' % (option, path))
 
 
 def _export_policies(config):
@@ -185,7 +233,7 @@ def load_config(script_dir=None, overrides=None):
         if not isinstance(values, dict):
             raise ValueError('Export config must be a table of options')
         unknown = (values.keys() - DEFAULTS.keys() - POLICY_DEFAULTS.keys() - set(POLICY_OPTIONS)
-                   - {'joint_limits', 'convex_decomposition', 'convex_hull', 'mesh_physics'})
+                   - set(SELECTION_OPTIONS) - {'joint_limits', 'convex_decomposition', 'convex_hull', 'mesh_physics'})
         if unknown:
             raise ValueError('Unknown export options: ' + ', '.join(sorted(map(str, unknown))))
         _export_policies(dict(values))
@@ -219,6 +267,7 @@ def load_config(script_dir=None, overrides=None):
                          ('generalized_joints', ('reject', 'decompose')),
                          ('ball_chart', ('reject', 'export-local-rx-ry-rz')),
                          ('motion_links', ('reject', 'mimic')),
+                         ('root_origin', ('design', 'root_occurrence')),
                          ('visual_materials', ('legacy', 'strict', 'diffuse-subset')),
                          ('visual_meshes', ('combined', 'per_body'))):
         if config.get(key, POLICY_DEFAULTS.get(key)) not in choices:
@@ -229,6 +278,7 @@ def load_config(script_dir=None, overrides=None):
         config[key] = _positive_number(config[key], key)
     if not isinstance(config['root_occurrence'], str):
         raise ValueError('root_occurrence must be an exact full occurrence path or design_root')
+    _selection(config)
     for key, value in collision.items():
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= COLLISION_MAXIMUMS[key]:
             raise ValueError('convex_decomposition.%s must be an integer in [1, %d]' % (key, COLLISION_MAXIMUMS[key]))

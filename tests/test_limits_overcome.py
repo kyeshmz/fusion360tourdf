@@ -216,9 +216,11 @@ class ConfigTest(unittest.TestCase):
     def test_defaults_and_validation(self):
         config = cfg.load_config(None, None)
         self.assertEqual(config, {'mesh_refinement': 'low', 'collision_method': 'visual',
-                                  'effort': 100.0, 'velocity': 100.0, 'root_occurrence': ''})
+                                  'effort': 100.0, 'velocity': 100.0, 'root_occurrence': '',
+                                  'root_origin': 'design'})
         for invalid in ({'ros_version': 'ros3'}, {'effort': 'x'}, {'collision_method': 'mesh'},
-                        {'root_occurrence': True}, {'root_occurrence': 1}, {'root_occurrence': []}):
+                        {'root_occurrence': True}, {'root_occurrence': 1}, {'root_occurrence': []},
+                        {'root_origin': 'world'}):
             with self.assertRaises(ValueError):
                 cfg.load_config(overrides=invalid)
 
